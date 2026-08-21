@@ -15,6 +15,7 @@ public class PostItDbContext : DbContext
     public DbSet<Board> Boards => Set<Board>();
     public DbSet<BoardMember> BoardMembers => Set<BoardMember>();
     public DbSet<Note> Notes => Set<Note>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

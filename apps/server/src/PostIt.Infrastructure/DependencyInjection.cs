@@ -1,7 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using PostIt.Application.Interfaces;
+using PostIt.Infrastructure.Authentication;
 using PostIt.Infrastructure.Persistence;
+using PostIt.Infrastructure.Persistence.Repositories;
 
 namespace PostIt.Infrastructure;
 
@@ -21,6 +24,11 @@ public static class DependencyInjection
                     npgsqlOptions.MigrationsHistoryTable("__EFMigrationsHistory", "public");
                 });
         });
+
+        services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IPasswordHasher, PasswordHasher>();
+        services.AddScoped<ITokenService, JwtTokenService>();
 
         return services;
     }

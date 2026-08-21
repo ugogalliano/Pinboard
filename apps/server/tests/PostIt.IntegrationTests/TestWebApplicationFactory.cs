@@ -28,7 +28,11 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncL
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:DefaultConnection"] = _postgresContainer.GetConnectionString()
+                ["ConnectionStrings:DefaultConnection"] = _postgresContainer.GetConnectionString(),
+                ["JwtSettings:Secret"] = "test-secret-key-that-is-at-least-32-characters-long-for-hmac",
+                ["JwtSettings:Issuer"] = "PostItTest",
+                ["JwtSettings:Audience"] = "PostItTest",
+                ["DisableRateLimiting"] = "true"
             });
         });
 
@@ -54,6 +58,10 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncL
     public async Task InitializeAsync()
     {
         await _postgresContainer.StartAsync();
+
+        using var scope = Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PostItDbContext>();
+        await context.Database.MigrateAsync();
     }
 
     public async new Task DisposeAsync()
