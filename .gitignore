@@ -2,3 +2,23 @@ node_modules/
 package-lock.json
 
 .worktrees/
+
+# .NET build artifacts
+bin/
+obj/
+out/
+publish/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test results
+TestResults/
+
+# NuGet
+*.nupkg
