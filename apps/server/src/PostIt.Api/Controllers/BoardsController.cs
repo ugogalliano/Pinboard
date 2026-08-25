@@ -12,10 +12,12 @@ namespace PostIt.Api.Controllers;
 public class BoardsController : ControllerBase
 {
     private readonly IBoardService _boardService;
+    private readonly IBoardMemberService _boardMemberService;
 
-    public BoardsController(IBoardService boardService)
+    public BoardsController(IBoardService boardService, IBoardMemberService boardMemberService)
     {
         _boardService = boardService;
+        _boardMemberService = boardMemberService;
     }
 
     [HttpGet]
@@ -124,6 +126,122 @@ public class BoardsController : ControllerBase
         catch (UnauthorizedAccessException)
         {
             return Forbid();
+        }
+    }
+
+    [HttpGet("{boardId:guid}/members")]
+    public async Task<ActionResult<IReadOnlyList<BoardMemberDto>>> GetMembers(Guid boardId, CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var members = await _boardMemberService.GetMembersAsync(userId.Value, boardId, cancellationToken);
+            return Ok(members);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+    }
+
+    [HttpPost("{boardId:guid}/members")]
+    public async Task<ActionResult<BoardMemberDto>> AddMember(Guid boardId, AddMemberRequest request, CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var member = await _boardMemberService.AddMemberAsync(userId.Value, boardId, request, cancellationToken);
+            return Ok(member);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPut("{boardId:guid}/members/{memberUserId:guid}")]
+    public async Task<ActionResult<BoardMemberDto>> UpdateMember(Guid boardId, Guid memberUserId, UpdateMemberRequest request, CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var member = await _boardMemberService.UpdateMemberAsync(userId.Value, boardId, memberUserId, request, cancellationToken);
+            return Ok(member);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpDelete("{boardId:guid}/members/{memberUserId:guid}")]
+    public async Task<IActionResult> DeleteMember(Guid boardId, Guid memberUserId, CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            await _boardMemberService.DeleteMemberAsync(userId.Value, boardId, memberUserId, cancellationToken);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
         }
     }
 

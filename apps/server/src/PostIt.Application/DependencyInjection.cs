@@ -9,6 +9,7 @@ public static class DependencyInjection
     {
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IBoardService, BoardService>();
+        services.AddScoped<IBoardMemberService, BoardMemberService>();
         services.AddScoped<IBoardAuthorizationService, BoardAuthorizationService>();
         return services;
     }
