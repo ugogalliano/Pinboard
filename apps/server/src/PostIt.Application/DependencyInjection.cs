@@ -11,6 +11,7 @@ public static class DependencyInjection
         services.AddScoped<IBoardService, BoardService>();
         services.AddScoped<IBoardMemberService, BoardMemberService>();
         services.AddScoped<IBoardAuthorizationService, BoardAuthorizationService>();
+        services.AddScoped<INoteService, NoteService>();
         return services;
     }
 }
