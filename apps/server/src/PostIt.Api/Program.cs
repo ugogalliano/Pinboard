@@ -6,7 +6,10 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
+using PostIt.Api.Hubs;
+using PostIt.Api.Services;
 using PostIt.Application;
+using PostIt.Application.Interfaces;
 using PostIt.Infrastructure;
 using PostIt.Infrastructure.Persistence;
 
@@ -45,9 +48,27 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero
         };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 
 builder.Services.AddAuthorization();
+
+// SignalR
+builder.Services.AddSignalR();
+builder.Services.AddScoped<IBoardNotificationService, BoardNotificationService>();
 
 // Rate Limiting
 builder.Services.AddRateLimiter(options =>
@@ -121,6 +142,7 @@ app.MapHealthChecks("/health", new HealthCheckOptions
 });
 
 app.MapControllers();
+app.MapHub<BoardHub>("/hubs/board");
 
 app.MapGet("/api/ping", () => Results.Ok(new { message = "pong", timestamp = DateTimeOffset.UtcNow }))
    .WithName("Ping")

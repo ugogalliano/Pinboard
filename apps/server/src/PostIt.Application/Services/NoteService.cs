@@ -9,15 +9,18 @@ public class NoteService : INoteService
     private readonly INoteRepository _noteRepository;
     private readonly IBoardRepository _boardRepository;
     private readonly IBoardAuthorizationService _authorizationService;
+    private readonly IBoardNotificationService _notificationService;
 
     public NoteService(
         INoteRepository noteRepository,
         IBoardRepository boardRepository,
-        IBoardAuthorizationService authorizationService)
+        IBoardAuthorizationService authorizationService,
+        IBoardNotificationService notificationService)
     {
         _noteRepository = noteRepository;
         _boardRepository = boardRepository;
         _authorizationService = authorizationService;
+        _notificationService = notificationService;
     }
 
     public async Task<IReadOnlyList<NoteDto>> GetNotesAsync(Guid userId, Guid boardId, CancellationToken cancellationToken = default)
@@ -57,7 +60,10 @@ public class NoteService : INoteService
         await _noteRepository.AddAsync(note, cancellationToken);
         await _noteRepository.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(note);
+        var noteDto = MapToDto(note);
+        await _notificationService.PostItCreated(boardId, noteDto, cancellationToken);
+
+        return noteDto;
     }
 
     public async Task<NoteDto> UpdateNoteAsync(Guid userId, Guid noteId, UpdateNoteRequest request, CancellationToken cancellationToken = default)
@@ -81,7 +87,10 @@ public class NoteService : INoteService
         note.UpdatePosition(request.PositionX, request.PositionY);
         await _noteRepository.SaveChangesAsync(cancellationToken);
 
-        return MapToDto(note);
+        var noteDto = MapToDto(note);
+        await _notificationService.PostItUpdated(note.BoardId, noteDto, cancellationToken);
+
+        return noteDto;
     }
 
     public async Task DeleteNoteAsync(Guid userId, Guid noteId, CancellationToken cancellationToken = default)
@@ -99,6 +108,8 @@ public class NoteService : INoteService
 
         await _noteRepository.DeleteAsync(note, cancellationToken);
         await _noteRepository.SaveChangesAsync(cancellationToken);
+
+        await _notificationService.PostItDeleted(note.BoardId, noteId, cancellationToken);
     }
 
     private static void ValidateContent(string content)

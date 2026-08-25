@@ -11,11 +11,12 @@ public class NoteServiceTests
     private readonly Mock<INoteRepository> _noteRepo = new();
     private readonly Mock<IBoardRepository> _boardRepo = new();
     private readonly Mock<IBoardAuthorizationService> _authSvc = new();
+    private readonly Mock<IBoardNotificationService> _notificationSvc = new();
     private readonly NoteService _svc;
 
     public NoteServiceTests()
     {
-        _svc = new NoteService(_noteRepo.Object, _boardRepo.Object, _authSvc.Object);
+        _svc = new NoteService(_noteRepo.Object, _boardRepo.Object, _authSvc.Object, _notificationSvc.Object);
     }
 
     private static Board CreateBoard(Guid boardId)
