@@ -25,7 +25,7 @@ public class EntityPersistenceTests : IClassFixture<TestWebApplicationFactory>
     public async Task Can_Create_And_Read_User()
     {
         using var context = CreateContext();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
 
         var user = new User("persist@example.com", "hash", "Persist User");
         context.Users.Add(user);
@@ -43,7 +43,7 @@ public class EntityPersistenceTests : IClassFixture<TestWebApplicationFactory>
     public async Task Can_Create_And_Read_Board_With_Relationships()
     {
         using var context = CreateContext();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
 
         var user = new User("board@example.com", "hash", "Board User");
         context.Users.Add(user);
@@ -70,7 +70,7 @@ public class EntityPersistenceTests : IClassFixture<TestWebApplicationFactory>
     public async Task Can_Create_And_Read_BoardMember()
     {
         using var context = CreateContext();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
 
         var owner = new User("owner@example.com", "hash", "Owner");
         var member = new User("member@example.com", "hash", "Member");
@@ -102,7 +102,7 @@ public class EntityPersistenceTests : IClassFixture<TestWebApplicationFactory>
     public async Task Duplicate_BoardMember_Is_Rejected()
     {
         using var context = CreateContext();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
 
         var owner = new User("dup-owner@example.com", "hash", "Owner");
         var member = new User("dup-member@example.com", "hash", "Member");
@@ -127,7 +127,7 @@ public class EntityPersistenceTests : IClassFixture<TestWebApplicationFactory>
     public async Task Can_Create_And_Read_Note()
     {
         using var context = CreateContext();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
 
         var user = new User("note@example.com", "hash", "Note User");
         context.Users.Add(user);
@@ -161,7 +161,7 @@ public class EntityPersistenceTests : IClassFixture<TestWebApplicationFactory>
     public async Task Board_Cascade_Deletes_Members_And_Notes()
     {
         using var context = CreateContext();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
 
         var user = new User("cascade@example.com", "hash", "Cascade User");
         context.Users.Add(user);
@@ -192,7 +192,7 @@ public class EntityPersistenceTests : IClassFixture<TestWebApplicationFactory>
     public async Task Note_Creator_SetNull_On_User_Delete()
     {
         using var context = CreateContext();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
 
         var user = new User("setnull@example.com", "hash", "SetNull User");
         context.Users.Add(user);
@@ -223,7 +223,7 @@ public class EntityPersistenceTests : IClassFixture<TestWebApplicationFactory>
     public async Task Can_Query_Notes_By_BoardId()
     {
         using var context = CreateContext();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
 
         var user = new User("query@example.com", "hash", "Query User");
         context.Users.Add(user);

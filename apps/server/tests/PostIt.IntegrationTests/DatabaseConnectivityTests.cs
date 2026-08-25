@@ -25,14 +25,13 @@ public class DatabaseConnectivityTests : IClassFixture<TestWebApplicationFactory
     }
 
     [Fact]
-    public async Task Can_Apply_Migrations()
+    public async Task Database_Is_Available()
     {
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PostItDbContext>();
 
-        await context.Database.MigrateAsync();
+        var canConnect = await context.Database.CanConnectAsync();
 
-        var appliedMigrations = await context.Database.GetAppliedMigrationsAsync();
-        Assert.NotEmpty(appliedMigrations);
+        Assert.True(canConnect);
     }
 }

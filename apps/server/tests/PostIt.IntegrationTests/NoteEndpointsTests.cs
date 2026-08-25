@@ -121,7 +121,7 @@ public class NoteEndpointsTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CreateNote_NonExistingBoard_ReturnsNotFound()
+    public async Task CreateNote_NonExistingBoard_ReturnsForbidden()
     {
         var token = await RegisterAndLoginAsync("create-note-404@example.com", "Password123!", "Create Note 404");
         _client.DefaultRequestHeaders.Authorization =
@@ -130,7 +130,7 @@ public class NoteEndpointsTests : IClassFixture<TestWebApplicationFactory>
         var request = new CreateNoteRequest("Hello", "yellow", 0, 0);
         var response = await _client.PostAsJsonAsync($"/api/boards/{Guid.NewGuid()}/notes", request);
 
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

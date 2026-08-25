@@ -20,6 +20,8 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("register")]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<LoginResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
         try
@@ -29,11 +31,13 @@ public class AuthController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 
     [HttpPost("login")]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
         try
@@ -43,11 +47,13 @@ public class AuthController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return Unauthorized(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized);
         }
     }
 
     [HttpPost("refresh")]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<LoginResponse>> Refresh(RefreshRequest request, CancellationToken cancellationToken)
     {
         try
@@ -57,11 +63,12 @@ public class AuthController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return Unauthorized(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized);
         }
     }
 
     [HttpPost("logout")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> Logout(RefreshRequest request, CancellationToken cancellationToken)
     {
         await _authService.LogoutAsync(request.RefreshToken, cancellationToken);
@@ -70,6 +77,9 @@ public class AuthController : ControllerBase
 
     [HttpGet("me")]
     [Authorize]
+    [ProducesResponseType(typeof(MeResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<MeResponse>> Me(CancellationToken cancellationToken)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)
@@ -77,13 +87,13 @@ public class AuthController : ControllerBase
 
         if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         var response = await _authService.GetMeAsync(userId, cancellationToken);
         if (response == null)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
 
         return Ok(response);

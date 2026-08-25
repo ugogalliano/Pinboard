@@ -153,7 +153,9 @@ public class BoardMemberEndpointsTests : IClassFixture<TestWebApplicationFactory
         var created = await createResponse.Content.ReadFromJsonAsync<BoardDto>();
         Assert.NotNull(created);
 
-        var response = await _client.PostAsJsonAsync($"/api/boards/{created.Id}/members", new AddMemberRequest("x@y.com", "Owner"));
+        await RegisterAndLoginAsync("add-member-invalid-target@example.com", "Password123!", "Target");
+
+        var response = await _client.PostAsJsonAsync($"/api/boards/{created.Id}/members", new AddMemberRequest("add-member-invalid-target@example.com", "Owner"));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 

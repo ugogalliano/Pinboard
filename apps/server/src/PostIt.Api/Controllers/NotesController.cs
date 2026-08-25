@@ -19,12 +19,16 @@ public class NotesController : ControllerBase
     }
 
     [HttpGet("boards/{boardId:guid}/notes")]
+    [ProducesResponseType(typeof(IReadOnlyList<NoteDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<NoteDto>>> GetNotes(Guid boardId, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -34,21 +38,26 @@ public class NotesController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
     }
 
     [HttpPost("boards/{boardId:guid}/notes")]
+    [ProducesResponseType(typeof(NoteDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<NoteDto>> CreateNote(Guid boardId, CreateNoteRequest request, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -58,25 +67,30 @@ public class NotesController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 
     [HttpPut("notes/{noteId:guid}")]
+    [ProducesResponseType(typeof(NoteDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<NoteDto>> UpdateNote(Guid noteId, UpdateNoteRequest request, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -86,25 +100,29 @@ public class NotesController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 
     [HttpDelete("notes/{noteId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteNote(Guid noteId, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -114,11 +132,11 @@ public class NotesController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
     }
 

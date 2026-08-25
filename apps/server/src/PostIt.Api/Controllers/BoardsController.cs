@@ -21,12 +21,14 @@ public class BoardsController : ControllerBase
     }
 
     [HttpGet]
+    [ProducesResponseType(typeof(IReadOnlyList<BoardDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IReadOnlyList<BoardDto>>> GetBoards(CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         var boards = await _boardService.GetBoardsForUserAsync(userId.Value, cancellationToken);
@@ -34,12 +36,15 @@ public class BoardsController : ControllerBase
     }
 
     [HttpPost]
+    [ProducesResponseType(typeof(BoardDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<BoardDto>> CreateBoard(CreateBoardRequest request, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -49,17 +54,21 @@ public class BoardsController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 
     [HttpGet("{boardId:guid}")]
+    [ProducesResponseType(typeof(BoardDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<BoardDto>> GetBoard(Guid boardId, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -69,21 +78,26 @@ public class BoardsController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
     }
 
     [HttpPut("{boardId:guid}")]
+    [ProducesResponseType(typeof(BoardDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<BoardDto>> UpdateBoard(Guid boardId, UpdateBoardRequest request, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -93,25 +107,29 @@ public class BoardsController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 
     [HttpDelete("{boardId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteBoard(Guid boardId, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -121,21 +139,25 @@ public class BoardsController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
     }
 
     [HttpGet("{boardId:guid}/members")]
+    [ProducesResponseType(typeof(IReadOnlyList<BoardMemberDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<BoardMemberDto>>> GetMembers(Guid boardId, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -145,21 +167,27 @@ public class BoardsController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
     }
 
     [HttpPost("{boardId:guid}/members")]
+    [ProducesResponseType(typeof(BoardMemberDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BoardMemberDto>> AddMember(Guid boardId, AddMemberRequest request, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -169,29 +197,35 @@ public class BoardsController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
         catch (InvalidOperationException ex)
         {
-            return Conflict(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 
     [HttpPut("{boardId:guid}/members/{memberUserId:guid}")]
+    [ProducesResponseType(typeof(BoardMemberDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BoardMemberDto>> UpdateMember(Guid boardId, Guid memberUserId, UpdateMemberRequest request, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -201,29 +235,34 @@ public class BoardsController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
         catch (InvalidOperationException ex)
         {
-            return Conflict(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
 
     [HttpDelete("{boardId:guid}/members/{memberUserId:guid}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeleteMember(Guid boardId, Guid memberUserId, CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         if (userId == null)
         {
-            return Unauthorized();
+            return Problem(statusCode: StatusCodes.Status401Unauthorized);
         }
 
         try
@@ -233,15 +272,15 @@ public class BoardsController : ControllerBase
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            return Problem(statusCode: StatusCodes.Status404NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            return Forbid();
+            return Problem(statusCode: StatusCodes.Status403Forbidden);
         }
         catch (InvalidOperationException ex)
         {
-            return Conflict(new { error = ex.Message });
+            return Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
         }
     }
 
