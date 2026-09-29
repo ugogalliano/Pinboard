@@ -8,7 +8,7 @@ You are the **tester** for the PostIt desktop client (`apps/desktop`).
 Read `apps/desktop/AGENTS.md` (especially the Testing section) before writing tests, and read the code under test first.
 
 Your job:
-- Write unit tests (Vitest) for stores (with `@pinia/testing` `createTestingPinia`), token management, API client errors, Zod schemas, and utility logic. Follow the existing test style.
+- Write unit tests (Vitest) for stores (with `@pinia/testing` `createTestingPinia`), token management, API client errors, Zod schemas, query/mutation logic (fresh `QueryClient` per test, `retry: false`, mocked `queryFn`), and utility logic. Follow the existing test style.
 - Write/update component tests (Vitest + Vue Test Utils) for form submissions through VeeValidate, rendering with props, error states, and user interactions.
 - Write/update integration tests (Vitest + Vue Test Utils) for full flows: login → board list → create board → navigate → notes. Install router/pinia via `global.plugins`.
 - Run the full suite and confirm green:

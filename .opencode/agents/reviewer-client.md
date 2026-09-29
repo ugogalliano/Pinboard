@@ -11,8 +11,8 @@ Read `apps/desktop/AGENTS.md` first; use it as the review checklist. You never e
 
 Review against:
 - **Correctness**: does the change satisfy the task? Edge cases, failure paths, async cleanup.
-- **Conventions** (AGENTS.md §2–4): naming, component/composable organization, feature-first layout, manual mapping, error → toast mapping, route guards, VeeValidate + Zod validation.
-- **Architecture**: state stays in Pinia stores, UI stays in components, API logic stays in `shared/services`; no business logic leaking into presentational components; thin feature composables.
+- **Conventions** (AGENTS.md §2–4): naming, component/composable organization, feature-first layout, manual mapping, error → toast mapping, route guards, VeeValidate + Zod validation, vue-query mutation cycle (optimistic → rollback → invalidate).
+- **Architecture**: server data lives in the vue-query cache (never duplicated into stores), client state in Pinia, UI stays in components, API logic stays in `shared/services` via `queryFn`/`mutationFn`; no business logic leaking into presentational components; thin feature composables.
 - **Patterns**: reuses existing patterns, no parallel inventions, no unrelated refactors, minimal diff.
 - **Tests**: new behavior is covered (success + failure), suite is green (`npm test`, `npm run build`).
 - **Doc drift**: if `PLAN.FE.md` or `README.md` are now stale, flag it.

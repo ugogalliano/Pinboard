@@ -20,8 +20,8 @@ You never write or modify code. Your role is to analyze, coordinate specialized 
   - `src/app/` — routing, layouts, global error handler.
   - `src/features/{auth,boards,notes,members}` — components, composables, feature logic.
   - `src/shared/` — UI primitives, API client, services, types, Zod schemas, composables.
-  - `src/stores/` — Pinia domain and UI state.
-- Reuse existing patterns such as typed `apiClient`, VeeValidate + Zod forms, optimistic updates, exception → toast mapping, route guards, manual mapping, and DI-like service usage.
+  - `src/stores/` — Pinia auth/UI state; server state lives in the vue-query cache.
+- Reuse existing patterns such as typed `apiClient`, Vue Query (`useQuery`/`useMutation`) data flow, VeeValidate + Zod forms, optimistic updates, exception → toast mapping, route guards, manual mapping, and DI-like service usage.
 - Call out API compatibility, auth/authz implications, security and performance concerns.
 - Keep the proposed change scoped. Do not introduce unrelated refactors.
 - Flag ambiguity instead of inventing requirements.

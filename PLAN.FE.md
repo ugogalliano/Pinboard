@@ -15,7 +15,8 @@ Target stack:
 - Tailwind CSS 3
 - Vite
 - Vue Router 4
-- Pinia (auth, domain and UI state)
+- Pinia (auth and UI state)
+- @tanstack/vue-query (server state: boards, notes, members)
 - VeeValidate 4 + Zod (forms and validation)
 - @microsoft/signalr
 - Tauri 2
@@ -54,15 +55,16 @@ The frontend is fully independent from the backend. Communication is via HTTP/We
 | Styling | Tailwind CSS 3 | Requirement |
 | Language | TypeScript 5 | Type safety |
 | Routing | Vue Router 4 | Official Vue router, explicit route config |
-| State | Pinia | Official Vue store; keeps the auth/domain/UI store split |
+| Client state | Pinia (auth + UI) | Token lifecycle, toasts, transient UI |
+| Server state | @tanstack/vue-query | Caching, dedup, invalidation, optimistic mutations |
 | Forms | VeeValidate 4 + Zod | Schema-based validation, per-field errors, server-error mapping |
-| HTTP | Native fetch | No extra dependency |
+| HTTP | Native fetch (behind apiClient) | No extra HTTP dependency |
 | Realtime | @microsoft/signalr | Official SignalR client |
 | Desktop | Tauri 2 | Native desktop wrapper |
 | Testing | Vitest + Vue Test Utils + jsdom | Vite-native |
 | Linting | ESLint (eslint-plugin-vue) + Prettier | Code quality |
 
-Scaffold with `npm create vue@latest` (TypeScript, Vue Router, Pinia, Vitest, ESLint, Prettier options selected).
+Scaffold with `npm create vue@latest` (TypeScript, Vue Router, Pinia, Vitest, ESLint, Prettier options selected), then add `@tanstack/vue-query`, `vee-validate` and `zod`.
 
 ---
 
@@ -92,7 +94,7 @@ apps/desktop/
 │   │   │   │   ├── CreateBoardDialog.vue
 │   │   │   │   └── BoardHeader.vue
 │   │   │   ├── composables/
-│   │   │   │   ├── useBoards.ts
+│   │   │   │   ├── useBoards.ts          # useQuery/useMutation wrappers
 │   │   │   │   └── useBoard.ts
 │   │   │   └── index.ts
 │   │   ├── notes/
@@ -102,8 +104,8 @@ apps/desktop/
 │   │   │   │   ├── PostItEditor.vue
 │   │   │   │   └── ColorPicker.vue
 │   │   │   ├── composables/
-│   │   │   │   ├── useNotes.ts
-│   │   │   │   └── useDragNote.ts
+│   │   │   │   ├── useNotes.ts           # useQuery/useMutation wrappers
+│   │   │   │   └── useDragNote.ts        # optimistic setQueryData + throttled PUT
 │   │   │   └── index.ts
 │   │   └── members/
 │   │       ├── components/
@@ -111,7 +113,7 @@ apps/desktop/
 │   │       │   ├── AddMemberDialog.vue
 │   │       │   └── RoleSelect.vue
 │   │       ├── composables/
-│   │       │   └── useMembers.ts
+│   │       │   └── useMembers.ts         # useQuery/useMutation wrappers
 │   │       └── index.ts
 │   ├── shared/
 │   │   ├── components/
@@ -126,7 +128,6 @@ apps/desktop/
 │   │   │       ├── Sidebar.vue
 │   │   │       └── Header.vue
 │   │   ├── composables/
-│   │   │   ├── useApi.ts
 │   │   │   ├── useSignalR.ts
 │   │   │   └── useDebounce.ts
 │   │   ├── services/
@@ -139,10 +140,9 @@ apps/desktop/
 │   │       ├── api.ts
 │   │       └── index.ts
 │   ├── stores/
-│   │   ├── authStore.ts          # Pinia: useAuthStore
-│   │   ├── boardStore.ts         # Pinia: useBoardStore
-│   │   └── uiStore.ts            # Pinia: useUIStore
-│   ├── main.ts
+│   │   ├── authStore.ts          # Pinia: useAuthStore (tokens, user)
+│   │   └── uiStore.ts            # Pinia: useUIStore (toasts, sidebar, modals)
+│   ├── main.ts                   # createApp + VueQueryPlugin (QueryClient)
 │   └── index.css
 ├── public/
 ├── index.html
@@ -230,7 +230,7 @@ Each form uses VeeValidate's `useForm` + `useField` (Composition API, `<script s
 const { handleSubmit, errors, setErrors } = useForm({
   validationSchema: toTypedSchema(loginSchema),
 })
-const onSubmit = handleSubmit((values) => auth.login(values))
+const onSubmit = handleSubmit((values) => mutation.mutateAsync(values))
 ```
 
 Rules:
@@ -238,6 +238,7 @@ Rules:
 - disable the submit button while the submission is pending (no double submits)
 - never bypass the schema with ad-hoc checks — if a rule changes, change the Zod schema
 - shared `Input.vue` renders VeeValidate field state (value, errors, touched) so every form looks consistent
+- submissions go through a `useMutation` (§8) — forms never call apiClient directly
 
 ### Server error mapping
 
@@ -252,7 +253,7 @@ Rules:
 
 ### Design
 
-Single typed `apiClient<T>(method, path, body?)` wrapping native `fetch`.
+Single typed `apiClient<T>(method, path, body?)` wrapping native `fetch`. It is the **only** HTTP layer: components never call it directly — feature composables wrap it in Vue Query `queryFn`/`mutationFn` (§8).
 
 Flow:
 1. Get accessToken from auth store
@@ -292,6 +293,8 @@ Notes:    GET/POST /api/boards/{id}/notes; PUT/DELETE /api/notes/{noteId}
 
 ## 7. Authentication
 
+Auth flows are **not** query-cached server state — they own the token lifecycle and app bootstrap, so they stay in Pinia as explicit actions (login/register/refresh/logout), each ending in either `setTokens` + `setUser` or `clearAuth`.
+
 ### Auth store (Pinia)
 
 ```text
@@ -320,22 +323,36 @@ interface AuthState {
 3. If refresh succeeds: retry original request (once)
 4. If refresh fails: clear auth, redirect to login
 
+On logout: `clearAuth` + `queryClient.clear()` so no board data survives in the query cache.
+
 ---
 
 ## 8. State management
 
-### Pinia stores
+Server state and client state are deliberately separated.
+
+### Server state — @tanstack/vue-query
+
+Boards, notes and members are server state and live **only** in the Vue Query cache:
+
+```text
+['boards']                       → GET /api/boards
+['boards', boardId]              → GET /api/boards/{id}
+['boards', boardId, 'notes']     → GET /api/boards/{id}/notes
+['boards', boardId, 'members']   → GET /api/boards/{id}/members
+```
+
+- **Reads**: `useQuery` with the key above; `isPending` / `isError` drive spinners and error states.
+- **Mutations**: `useMutation` with the standard cycle — `onMutate` (cancel queries + `setQueryData` optimistic write), `onError` (rollback + toast), `onSettled` (`invalidateQueries` on the affected keys).
+- **Realtime**: SignalR events write into the same cache via `setQueryData` (§11) — one source of truth, never duplicated into a store.
+- **QueryClient** (created in `main.ts` with `VueQueryPlugin`): retry once for network errors only (never for `ApiError`), `refetchOnWindowFocus: false`, `staleTime: 30_000`.
+
+### Client state — Pinia
 
 **Auth store** (`useAuthStore`):
 ```text
 user, accessToken, refreshToken, isLoading
-Actions: setTokens, setUser, clearAuth, setLoading
-```
-
-**Board store** (`useBoardStore`, domain data, no persistence):
-```text
-boards, activeBoard, members, isLoading
-Actions: setBoards, setActiveBoard, setMembers, updateBoard, removeBoard, addMember, removeMember
+Actions: setTokens, setUser, clearAuth, setLoading (+ login/register/logout/refreshUser)
 ```
 
 **UI store** (`useUIStore`, transient):
@@ -346,10 +363,11 @@ Actions: toggleSidebar, addToast, removeToast, openModal, closeModal
 
 ### Why this split
 
-- Auth store: owns token lifecycle and isAuthenticated; consumed by router guards and layout rendering
-- Board store: domain data shared across boards/notes/members features without prop drilling
-- UI store: transient UI state (sidebar, toasts, modals) isolated from domain reactivity
-- Components read state via `storeToRefs` and call actions; stores never import components
+- Vue Query owns everything the server owns — caching, dedup, refetch, optimistic rollback. Mirroring that data in a Pinia store would create a second source of truth and re-implement what the library already does.
+- `activeBoard` is not stored anywhere: it derives from the `:boardId` route param (§9).
+- Auth store: token lifecycle and `isAuthenticated` for router guards.
+- UI store: transient UI state isolated from data fetching.
+- Components read Pinia state via `storeToRefs` and query state via `useQuery` destructuring (`data`, `isPending`, `isError`).
 
 ---
 
@@ -438,17 +456,30 @@ On board canvas unmount (`onUnmounted`):
 2. Unregister handlers
 3. Keep connection alive (don't stop)
 
-### Optimistic updates
+### Realtime → query cache
 
-**Drag-and-drop:**
-1. Move note locally in store immediately
-2. Send PUT /api/notes/{noteId}
-3. On success: no-op
-4. On failure: revert position, show error toast
+Handlers do **not** fetch or go through stores: they write into the notes query cache directly:
+
+- `onPostItCreated` → `setQueryData(['boards', boardId, 'notes'], append(note))`
+- `onPostItUpdated` → `setQueryData([...], update(note))`
+- `onPostItDeleted` → `setQueryData([...], remove(noteId))`
+
+Remote changes therefore appear instantly without a refetch. Use `invalidateQueries` only as a fallback when the payload is partial or unknown.
+
+### Optimistic updates (Vue Query mutation cycle)
+
+**Drag-and-drop (`useDragNote`):**
+1. `setQueryData` on `['boards', boardId, 'notes']` — move the note immediately
+2. throttled `PUT /api/notes/{noteId}` via `useMutation`
+3. `onMutate`: snapshot previous cache (and `cancelQueries` for that key)
+4. `onError`: restore snapshot + error toast
+5. `onSettled`: `invalidateQueries(['boards', boardId, 'notes'])`
 
 **Create/delete:**
-1. Create: add to store, send POST. On failure, remove.
-2. Delete: remove from store, send DELETE. On failure, re-add.
+1. `onMutate`: `setQueryData` add/remove the note locally
+2. `onError`: rollback + toast; `onSettled`: invalidate the notes key
+
+Same cycle for boards and members mutations (create/update/delete → invalidate the affected key).
 
 ---
 
@@ -458,30 +489,30 @@ On board canvas unmount (`onUnmounted`):
 
 | Component | Responsibility |
 |-----------|---------------|
-| LoginForm | VeeValidate form (`loginSchema`): email + password, submit calls login(), shows field + form-level errors |
-| RegisterForm | VeeValidate form (`registerSchema`): email + password + displayName, submit calls register(), shows field + form-level errors |
+| LoginForm | VeeValidate form (`loginSchema`): email + password, submit calls authStore login(), shows field + form-level errors |
+| RegisterForm | VeeValidate form (`registerSchema`): email + password + displayName, submit calls authStore register(), shows field + form-level errors |
 | useAuth | Auth state + actions from auth store |
 
 ### Boards
 
 | Component | Responsibility |
 |-----------|---------------|
-| BoardList | Fetches boards, renders BoardCard for each, "Create Board" button |
+| BoardList | Renders the `['boards']` query (isPending → spinner, empty → empty state), "Create Board" button |
 | BoardCard | Board name, member count, created date. Click navigates to board |
-| CreateBoardDialog | Modal with VeeValidate name field (`boardNameSchema`, ≤200), POST /api/boards |
+| CreateBoardDialog | Modal with VeeValidate name field (`boardNameSchema`, ≤200) → create-board mutation |
 | BoardHeader | Active board name, edit/delete (Owner only), member count badge |
-| useBoards | Fetch boards, handle create/update/delete |
+| useBoards | `useQuery(['boards'])` + mutations (create/update/delete) with invalidation |
 
 ### Notes
 
 | Component | Responsibility |
 |-----------|---------------|
-| NoteCanvas | Main board area, renders PostItCard instances, drag-and-drop, double-click to create |
+| NoteCanvas | Main board area, renders PostItCard from `['boards', boardId, 'notes']`, drag-and-drop, double-click to create |
 | PostItCard | Single Post-it: content, color, position, draggable, edit/delete |
 | PostItEditor | Inline editor for content + color, validated with `noteSchema` on save (≤1000 / ≤50). Save on blur/Enter, cancel on Escape |
 | ColorPicker | Predefined color palette (8-10 sticky note colors) |
-| useNotes | Fetch notes, handle CRUD, subscribe to SignalR events |
-| useDragNote | Drag state, throttled position updates, optimistic updates |
+| useNotes | `useQuery`/`useMutation` over the notes key, optimistic create/delete, SignalR cache writes |
+| useDragNote | Drag state, throttled position updates, optimistic `setQueryData` with rollback |
 
 Canvas behavior:
 - Notes absolutely positioned within scrollable container
@@ -494,9 +525,9 @@ Canvas behavior:
 | Component | Responsibility |
 |-----------|---------------|
 | MemberList | Members with role badges. Owner-only actions visible. |
-| AddMemberDialog | VeeValidate form (`memberSchema`: email + role selector), POST /api/boards/{id}/members |
+| AddMemberDialog | VeeValidate form (`memberSchema`: email + role selector) → add-member mutation |
 | RoleSelect | Dropdown to change role (Editor/Viewer). Owner not changeable. |
-| useMembers | Fetch members, handle add/update/remove |
+| useMembers | `useQuery`/`useMutation` over the members key (add/update/remove + invalidation) |
 
 Authorization-aware rendering:
 - Owner: add member, change role, remove member
@@ -522,10 +553,10 @@ Authorization-aware rendering:
 
 ### Four layers
 
-1. **API Client**: intercepts responses, parses ProblemDetails, throws ApiError, handles 401
-2. **Feature composables**: catch ApiError, map status to messages, add toast
-3. **Forms**: VeeValidate validates client-side via Zod; server validation errors (400 `errors` dictionary) are mapped into field errors (§5)
-4. **Global error handler**: `app.config.errorHandler` + `onErrorCaptured` at app root catches unhandled errors, shows ErrorFallback UI with retry
+1. **API Client**: intercepts responses, parses ProblemDetails, throws ApiError, handles 401 refresh/retry.
+2. **Vue Query**: mutation `onError` → status-to-message mapping → toast (plus cache rollback for optimistic flows); query `isError` → component error state with retry affordance. Retry policy: one retry for network errors only, never for `ApiError` (4xx/5xx are final — the backend already decided).
+3. **Forms**: VeeValidate validates client-side via Zod; server validation errors (400 `errors` dictionary) are mapped into field errors (§5).
+4. **Global error handler**: `app.config.errorHandler` + `onErrorCaptured` at app root catches unhandled errors, shows ErrorFallback UI with retry.
 
 ### Status mapping
 
@@ -545,12 +576,15 @@ Authorization-aware rendering:
 
 | Layer | Tool | What to test |
 |-------|------|-------------|
-| Unit | Vitest | Store logic, token management, API client errors, Zod schemas |
+| Unit | Vitest | Stores (auth/ui), token management, API client errors, Zod schemas, query/mutation logic |
 | Component | Vitest + Vue Test Utils | Form submissions (VeeValidate), rendering with props, error states |
 | Integration | Vitest + Vue Test Utils | Full flows: login → board list → create board → navigate |
 | E2E | (deferred) | Full app flow in Tauri. Not in MVP. |
 
-Test setup: each test installs the needed plugins (Pinia — `@pinia/testing` `createTestingPinia` for store isolation — and Vue Router) via Vue Test Utils `global.plugins`.
+Test setup: each test installs its own plugins via `global.plugins`:
+- Pinia — `@pinia/testing` `createTestingPinia` for store isolation
+- Vue Router — memory history with the routes under test
+- Vue Query — a **fresh `QueryClient` per test** with `retry: false` and mocked `queryFn`s (never hit the network)
 
 ### File convention
 
@@ -660,6 +694,7 @@ npm test             # Vitest
 Tasks:
 - wipe the orphaned React remnants in `apps/desktop/` (`package-lock.json`, `node_modules/`, `dist/`)
 - scaffold with `npm create vue@latest` (TypeScript, Vue Router, Pinia, Vitest, ESLint, Prettier)
+- add dependencies: `@tanstack/vue-query`, `vee-validate`, `zod`
 - configure Tailwind CSS
 - set up Tauri 2 (src-tauri/)
 - configure path aliases (@/ → src/)
@@ -687,16 +722,18 @@ Tasks:
 - implement token management (services/token.ts)
 - implement apiClient with error handling and token refresh (services/api.ts)
 - implement ApiError class
+- set up Vue Query: `VueQueryPlugin` in main.ts, `QueryClient` defaults (network-error retry only, `refetchOnWindowFocus: false`, `staleTime: 30_000`)
 - build shared UI components: Button, Input, Dialog, Toast, Spinner, ErrorFallback
-- implement Pinia stores: authStore, boardStore, uiStore
+- implement Pinia stores: authStore, uiStore
 - set up VeeValidate (register `useForm`/`useField`, `toTypedSchema` convention)
 - implement useDebounce composable
 
 Acceptance criteria:
 - apiClient can make typed requests
 - Token refresh works automatically on 401
+- QueryClient defaults applied (verifiable via Vue Query devtools / a smoke query)
 - UI components render with correct variants
-- Pinia stores are functional
+- auth/UI stores are functional
 - Zod schemas reject invalid input in unit tests
 
 Commit:
@@ -715,6 +752,7 @@ Tasks:
 - build AuthLayout
 - implement route guards (`router.beforeEach`)
 - set up Vue Router with /login and /register routes
+- clear the query cache on logout (`queryClient.clear()`)
 - test auth flow end-to-end
 
 Acceptance criteria:
@@ -726,6 +764,7 @@ Acceptance criteria:
 - protected routes redirect to /login when unauthenticated
 - refresh token persists across app restarts
 - 401 during session triggers automatic refresh
+- logout leaves no board data in the query cache
 
 Commit:
 ```text
@@ -737,8 +776,8 @@ feat: add authentication
 ### Phase 4 — Boards
 
 Tasks:
-- implement useBoards composable (fetch, create, update, delete)
-- implement useBoard composable (single board)
+- implement useBoards composable (`useQuery(['boards'])` + create/update/delete mutations with invalidation)
+- implement useBoard composable (single board query)
 - build BoardList component
 - build BoardCard component
 - build CreateBoardDialog component (VeeValidate + `boardNameSchema`)
@@ -755,7 +794,7 @@ Acceptance criteria:
 - user can navigate to a board
 - user can rename a board (Owner only)
 - user can delete a board (Owner only)
-- board list updates after create/delete
+- board list updates after create/delete (query invalidation)
 - unauthorized actions are hidden/disabled
 
 Commit:
@@ -768,15 +807,14 @@ feat: add boards
 ### Phase 5 — Notes (core)
 
 Tasks:
-- implement useNotes composable (fetch, create, update, delete)
-- implement useDragNote composable (drag state, throttled updates, optimistic)
+- implement useNotes composable (`useQuery`/`useMutation` over `['boards', boardId, 'notes']`)
+- implement useDragNote composable (drag state, throttled updates, optimistic `setQueryData` with rollback)
 - build NoteCanvas component (scrollable, absolutely positioned notes)
 - build PostItCard component (content, color, draggable)
 - build PostItEditor component (inline edit, `noteSchema` validation, save on blur/Enter)
 - build ColorPicker component (predefined palette)
 - add double-click-to-create on canvas
-- implement optimistic updates for drag-and-drop
-- implement optimistic updates for create/delete
+- implement optimistic create/delete via the mutation cycle (`onMutate` → `onError` rollback → `onSettled` invalidate)
 
 Acceptance criteria:
 - notes load for a board
@@ -784,6 +822,7 @@ Acceptance criteria:
 - user can edit note content and color
 - content over 1000 chars is rejected client-side with an inline error
 - user can drag notes to reposition
+- failed drag/create/delete rolls back the cache and shows an error toast
 - user can delete notes
 - position changes persist to backend
 - notes survive app restart
@@ -799,7 +838,7 @@ feat: add notes canvas
 ### Phase 6 — Members
 
 Tasks:
-- implement useMembers composable (fetch, add, update role, remove)
+- implement useMembers composable (`useQuery`/`useMutation` over the members key)
 - build MemberList component
 - build AddMemberDialog component (VeeValidate + `memberSchema`)
 - build RoleSelect component
@@ -829,9 +868,9 @@ feat: add board members
 
 Tasks:
 - implement BoardSignalRService (connect, reconnect, join/leave)
-- wire PostItCreated event to notes store
-- wire PostItUpdated event to notes store
-- wire PostItDeleted event to notes store
+- wire PostItCreated event to the notes query cache (`setQueryData`)
+- wire PostItUpdated event to the notes query cache (`setQueryData`)
+- wire PostItDeleted event to the notes query cache (`setQueryData`)
 - join board group on canvas `onMounted`
 - leave board group on canvas `onUnmounted`
 - handle connection state (connected/disconnected/reconnecting)
@@ -840,7 +879,7 @@ Tasks:
 Acceptance criteria:
 - user connects to SignalR on board canvas mount
 - user joins board group
-- note created by another user appears in real-time
+- note created by another user appears in real-time (no refetch)
 - note updated by another user updates in real-time
 - note deleted by another user is removed in real-time
 - connection loss shows status indicator
@@ -857,7 +896,7 @@ feat: add realtime board collaboration
 
 Tasks:
 - integrate global error handler (`app.config.errorHandler` + `onErrorCaptured`) at app root
-- add loading states (spinners) for all async operations
+- add loading states (spinners) for all async operations (query `isPending`)
 - add empty states (no boards, no notes, no members)
 - add toast notifications for all success/error flows
 - adjust layout for Tauri window sizes
@@ -892,6 +931,7 @@ Frontend MVP is complete only when all of these are true:
 - [ ] Token refresh works automatically
 - [ ] Invalid input shows inline field errors (VeeValidate + Zod)
 - [ ] Client-side limits mirror backend (board 200 / content 1000 / color 50)
+- [ ] Server data (boards/notes/members) flows only through vue-query — no duplicated domain stores
 - [ ] User sees their boards
 - [ ] User can create a board
 - [ ] User can navigate to a board
@@ -902,10 +942,11 @@ Frontend MVP is complete only when all of these are true:
 - [ ] User can drag notes to reposition
 - [ ] User can delete notes
 - [ ] Position changes persist
+- [ ] Failed optimistic actions roll back with an error toast
 - [ ] Members can be added/removed (Owner)
 - [ ] Role changes work (Owner)
 - [ ] Authorization-aware UI (Owner/Editor/Viewer)
-- [ ] SignalR realtime updates work
+- [ ] SignalR realtime updates work (query cache writes)
 - [ ] Connection status indicator shows
 - [ ] Error toasts appear for failures
 - [ ] Loading states show spinners

@@ -7,15 +7,16 @@ conventions, patterns, commands, and the Definition of Done.
 ## 1. Structure and architecture
 
 The desktop client is a **Vue 3 + TypeScript + Vite** SPA wrapped by **Tauri 2**,
-following a **feature-first layout** with a shared layer and Pinia stores:
+following a **feature-first layout** with a shared layer, Pinia stores and a
+Vue Query data layer:
 
 ```text
 apps/desktop/src/
 ├── app/           # App.vue, router.ts, layouts/ (AuthLayout, BoardLayout)
 ├── features/      # auth, boards, notes, members — each with components/, composables/, index.ts
 ├── shared/        # components/{ui,layout}, composables, services, validation, types
-├── stores/        # Pinia: authStore.ts, boardStore.ts, uiStore.ts
-├── main.ts
+├── stores/        # Pinia: authStore.ts, uiStore.ts
+├── main.ts        # createApp + VueQueryPlugin (QueryClient)
 └── index.css
 ```
 
@@ -26,16 +27,23 @@ not import another feature's internals (share via `shared/` or stores instead).
 Key mechanics:
 
 - **Components**: `<script setup lang="ts">` SFCs. UI events stay in the
-  component; reusable flows live in composables; all server calls go through
-  `shared/services` (`api.ts`, `signalr.ts`) — never `fetch` directly in a
-  component or composable.
-- **State**: three Pinia stores (auth / domain / UI); components read reactive
-  state via `storeToRefs` and mutate through actions only (see §5).
+  component; reusable flows live in composables; every server call goes through
+  `shared/services/api.ts` **invoked from a Vue Query `queryFn`/`mutationFn`** —
+  never `fetch` (or a bare `apiClient` call) directly in a component.
+- **Server state**: `@tanstack/vue-query` — boards, notes and members live only
+  in the query cache (`['boards']`, `['boards', boardId, 'notes']`,
+  `['boards', boardId, 'members']`). Reads use `useQuery`, mutations use
+  `useMutation` with the cycle optimistic write (`onMutate`) → rollback
+  (`onError`) → invalidate (`onSettled`). Never mirror query data into Pinia.
+- **Client state**: Pinia — `authStore` (tokens, user) and `uiStore` (toasts,
+  sidebar, modals). `activeBoard` derives from the `:boardId` route param, not
+  from a store.
 - **Validation**: VeeValidate + Zod. Schemas in `shared/validation/schemas.ts`
   are the single source of truth, mirroring backend limits (board name ≤200,
   note content ≤1000, note color ≤50, role ∈ {Editor, Viewer}) — see §4.
 - **Realtime**: `BoardSignalRService` in `shared/services/signalr.ts`;
-  mutations are optimistic with rollback + error toast on failure.
+  events write straight into the query cache (`setQueryData`), mutations are
+  optimistic with rollback + error toast on failure.
 - **Routing**: Vue Router with a global `router.beforeEach` guard
   (isLoading / isAuthenticated logic).
 
@@ -45,9 +53,15 @@ Key mechanics:
   file, `<script setup lang="ts">` always; `<style scoped>` only when Tailwind
   utilities are not enough. Use PascalCase in templates for custom components.
 - **Composables**: camelCase `useXxx.ts` files returning an object of reactive
-  state + actions. Keep them small; split before they grow into god-objects.
+  state + actions. Feature composables wrap `useQuery`/`useMutation` and own the
+  query keys for their feature. Keep them small; split before they grow into
+  god-objects.
+- **Query keys**: array keys defined next to their composable (e.g.
+  `['boards', boardId, 'notes']`); consumers reference the exported key
+  factory — no ad-hoc key strings scattered around the codebase.
 - **Stores**: `defineStore('name', ...)` in `src/stores/*.ts`; state as
-  refs/getters, mutations as actions. One store per domain (auth/board/ui).
+  refs/getters, mutations as actions. One store per domain (auth/ui) — server
+  data does not go here.
 - **Types**: DTO mirrors in `shared/types/api.ts`; GUIDs are strings; types
   match backend records field-for-field (manual mapping when view models differ).
 - **Props/emits**: props camelCase in script; emits declared with `defineEmits`.
@@ -65,11 +79,13 @@ Key mechanics:
 - **Feature-first layout**: feature internals (`components/`, `composables/`)
   are private to the feature; cross-feature reuse goes through `shared/`.
 - **Thin component / composable split**: the component renders and delegates;
-  the composable orchestrates store + apiClient.
+  the composable owns query keys, `queryFn`/`mutationFn` (calling `apiClient`)
+  and the mutation cycle.
 - **Typed `apiClient<T>`** for every request; `ApiError` carries
   `ProblemDetails`; exception → status → message → toast mapping (§4).
-- **Optimistic updates** for drag, create and delete, with rollback and a toast
-  on failure.
+- **Vue Query mutation cycle** for writes: `onMutate` (cancel + optimistic
+  `setQueryData`), `onError` (rollback + toast), `onSettled`
+  (`invalidateQueries` on the affected keys).
 - **Route guards** in `router.beforeEach`; authorization-aware rendering
   (Owner/Editor/Viewer) hides actions the API would reject anyway.
 - **Forms**: every text-input form uses VeeValidate `useForm`/`useField` with
@@ -79,7 +95,10 @@ Key mechanics:
 
 ### Avoid
 
-- Direct `fetch` outside `shared/services/api.ts`.
+- Direct `fetch` outside `shared/services/api.ts` — and no bare `apiClient`
+  calls from components (go through `useQuery`/`useMutation`).
+- Duplicating query data into Pinia (two sources of truth) or re-implementing
+  caching/refetch logic by hand.
 - Storing the access token anywhere but memory (refresh token: localStorage only).
 - Business logic or validation rules inside templates.
 - A second validation system alongside Zod (no manual `if (value.length > …)`).
@@ -98,6 +117,11 @@ retry, 204 → `undefined`, non-OK → parse `ProblemDetails`, throw:
 class ApiError extends Error { status: number; problem: ProblemDetails }
 ```
 
+It is consumed exclusively through Vue Query: `queryFn` for reads,
+`mutationFn` for writes. QueryClient defaults (set in `main.ts`): one retry for
+network errors only (never for `ApiError`), `refetchOnWindowFocus: false`,
+`staleTime: 30_000`.
+
 Endpoints (all JSON):
 
 ```text
@@ -113,7 +137,7 @@ Notes:    GET/POST /api/boards/{id}/notes; PUT/DELETE /api/notes/{noteId}
   board name required ≤200, note content required ≤1000, note color required
   ≤50, role must be `"Editor" | "Viewer"`, auth fields required (email + format).
 - Forms validate through VeeValidate with `toTypedSchema`; submit is disabled
-  while pending; errors render inline.
+  while pending; errors render inline; submissions go through a `useMutation`.
 - **Client validation is UX, not security** — the backend is authoritative.
 - Server 400 with an `errors` dictionary → map into VeeValidate `setErrors`;
   400 with `detail` only → form-level error or toast.
@@ -129,31 +153,43 @@ Notes:    GET/POST /api/boards/{id}/notes; PUT/DELETE /api/notes/{noteId}
 500 → "Something went wrong. Please try again."
 ```
 
-Unhandled errors are caught by the global handler (`app.config.errorHandler` +
-`onErrorCaptured` on the root component) → `ErrorFallback.vue` with retry.
+Mutation `onError` performs this mapping → toast (plus cache rollback when the
+flow was optimistic). Query `isError` renders a component-level error state with
+a retry affordance. Unhandled errors are caught by the global handler
+(`app.config.errorHandler` + `onErrorCaptured` on the root component) →
+`ErrorFallback.vue` with retry.
 
-## 5. State management (Pinia)
+## 5. State management
 
-| Store | Owns | Persistence |
+Two stores plus the query cache — server data never lands in Pinia:
+
+| Store / cache | Owns | Persistence |
 |-------|------|-------------|
+| **Vue Query cache** | boards, notes, members (`useQuery` reads, `useMutation` writes, SignalR `setQueryData`) | in-memory cache; cleared on logout via `queryClient.clear()` |
 | `authStore` | user, accessToken, refreshToken, isLoading; login/register/logout/refresh actions | refresh token in localStorage (via `token.ts`), access token memory only |
-| `boardStore` | boards, activeBoard, members, isLoading; CRUD actions | none |
 | `uiStore` | sidebarOpen, toasts, activeModal; transient actions | none |
 
 Rules:
-- Components read with `storeToRefs`, mutate only through actions.
+- Components read Pinia state with `storeToRefs` and query state via
+  `useQuery` (`data`, `isPending`, `isError`); mutate stores only through
+  actions; mutate query data only through the mutation cycle / `setQueryData`
+  in SignalR handlers.
 - A store only touches its own state; cross-store needs go through actions.
 - `isAuthenticated` comes from `authStore` and drives `router.beforeEach`.
+- `activeBoard` derives from the route param — never cached in a store.
+- Auth calls (login/register/refresh/logout) stay in `authStore` actions — they
+  manage tokens, not cacheable server state.
 - No business rules inside stores' mutation code beyond orchestration.
 
 ## 6. Testing and verification
 
 - **Unit** (Vitest): stores (with `@pinia/testing` `createTestingPinia`),
-  token management, apiClient error/refresh paths, Zod schemas.
+  token management, apiClient error/refresh paths, Zod schemas, query/mutation
+  logic (fresh `QueryClient` per test with `retry: false`, mocked `queryFn`).
 - **Component** (Vitest + Vue Test Utils): form submissions through VeeValidate,
   rendering with props, error states.
 - **Integration** (Vitest + Vue Test Utils): login → board list → create board
-  → navigate; install router/pinia via `global.plugins`.
+  → navigate; install router/pinia/vue-query via `global.plugins`.
 - Convention: colocated `*.test.ts` next to the source file
   (`NoteCanvas.vue` → `NoteCanvas.test.ts`).
 - Not in MVP: SignalR connection (integration only), Tauri-specific APIs,
@@ -173,7 +209,8 @@ failing test; report it instead.
 ## 7. Security and secrets
 
 - **Tokens**: access token memory only (never localStorage); refresh token in
-  localStorage; `clearTokens` on logout; refresh retried once on 401.
+  localStorage; `clearTokens` on logout; refresh retried once on 401; query
+  cache cleared on logout (`queryClient.clear()`).
 - **Authz**: `router.beforeEach` guards routes; Owner/Editor/Viewer-aware UI
   hides actions; API 403 handled gracefully. Guards are UX — every mutation is
   re-authorized server-side.
@@ -189,13 +226,16 @@ failing test; report it instead.
 ## 8. Performance
 
 - **Rendering**: subscribe to minimal store slices (`storeToRefs` per field);
-  avoid whole-store spreads in computed values; stable `:key`s in lists
+  query state through the owning `useQuery` only; stable `:key`s in lists
   (`BoardList`, `MemberList`).
-- **Drag-and-drop**: throttled position updates, optimistic apply with
+- **Query cache**: precise keys and targeted `invalidateQueries` (invalidate
+  the affected key, never everything); rely on `staleTime` instead of
+  refetching on every mount; no broad `refetchOnWindowFocus` churn.
+- **Drag-and-drop**: throttled position updates, optimistic `setQueryData` with
   rollback, prefer `transform` over `top`/`left`, no layout thrashing.
-- **SignalR**: handlers write straight to the store (no intermediate copies);
-  connection-state updates isolated so they don't re-render the canvas; lean
-  DTO payloads only.
+- **SignalR**: handlers write straight into the query cache
+  (`setQueryData` — no refetch storms); connection state updates isolated so
+  they don't re-render the canvas; lean DTO payloads only.
 - **Reactivity**: computed for derived values, `watch` with cleanup, avoid deep
   watchers on collections; no heavy work in render functions/templates.
 - **Async**: abort in-flight fetches on unmount; no sync-over-async.
@@ -223,12 +263,13 @@ Run only the review stages relevant to the change. All agents obey §10.
 ## 10. Agent working rules (mandatory)
 
 - **Read the code before modifying it** — the file, its imports, neighbors.
-- **Reuse existing patterns** (apiClient, stores, VeeValidate forms, toast
-  mapping) instead of inventing parallel ones.
+- **Reuse existing patterns** (apiClient, vue-query cycle, stores, VeeValidate
+  forms, toast mapping) instead of inventing parallel ones.
 - **Keep the diff minimal.** No refactoring unless requested; mention problems
   instead of silently restructuring.
 - **Never ignore failing tests / lint / build.** A red suite is a blocker.
-- **No new dependencies without justification** (Zod/VeeValidate are approved).
+- **No new dependencies without justification** (Vue, Pinia, vue-query,
+  VeeValidate, Zod are approved).
 - **Branch rule**: work happens on the `feat/fe-<slug>` branch created and
   verified by `architect-client`; if you are not on it, stop and ask.
 - **Flag conflicts and ambiguity** (PLAN.FE.md vs code drift, contradictory
@@ -242,10 +283,16 @@ A task on `apps/desktop` is done only when all of these hold:
 - [ ] `npm run build` succeeds with no new warnings.
 - [ ] `npm run lint` reports no new issues.
 - [ ] New behavior has tests covering success and failure paths.
+- [ ] Server data flows through vue-query only (queryFn/mutationFn); no
+      duplicated domain state in stores.
+- [ ] Mutations follow the optimistic → rollback → invalidate cycle where an
+      optimistic UX applies.
 - [ ] Forms use VeeValidate + the shared Zod schema; limits mirror the backend.
 - [ ] Errors follow the §4 status mapping; failures surface as toasts.
-- [ ] State lives in Pinia stores; no server calls outside `shared/services`.
-- [ ] No tokens/secrets committed, logged, or persisted beyond localStorage refresh token.
+- [ ] Client state lives in Pinia (auth/UI); no server calls outside
+      `shared/services`.
+- [ ] No tokens/secrets committed, logged, or persisted beyond localStorage
+      refresh token.
 - [ ] No new dependencies without stated justification.
 - [ ] Diff is minimal; no unrequested refactors.
 - [ ] `PLAN.FE.md` (or this file) updated or flagged if the change makes it stale.
