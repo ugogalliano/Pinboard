@@ -1,0 +1,938 @@
+# PLAN.FE.md
+
+# PostIt Frontend — Desktop Client Plan
+
+## 0. Scope and execution rule
+
+This is the **frontend implementation plan** for the PostIt desktop client.
+
+The frontend should be built incrementally, with each phase producing a runnable and testable result.
+
+Target stack:
+
+- Vue 3 (Composition API, `<script setup>`)
+- TypeScript 5
+- Tailwind CSS 3
+- Vite
+- Vue Router 4
+- Pinia (auth, domain and UI state)
+- VeeValidate 4 + Zod (forms and validation)
+- @microsoft/signalr
+- Tauri 2
+- Vitest + Vue Test Utils
+
+---
+
+## 1. Monorepo structure
+
+The frontend lives alongside the existing backend:
+
+```text
+Pinboard/
+├── apps/
+│   ├── server/        # .NET backend (existing)
+│   └── desktop/       # Vue + Tauri frontend (new)
+├── docs/
+├── PLAN.BE.md
+└── PLAN.FE.md         # This file
+```
+
+The frontend is fully independent from the backend. Communication is via HTTP/WebSocket only.
+
+> Note: `apps/desktop/` currently contains orphaned React scaffold remnants
+> (`package-lock.json`, `node_modules/`, `dist/`) with no source code. Phase 1
+> wipes them before scaffolding the Vue project.
+
+---
+
+## 2. Tech stack
+
+| Concern | Choice | Rationale |
+|---------|--------|-----------|
+| Build | Vite | Fast HMR, native ESM, Tauri-compatible |
+| Framework | Vue 3 (Composition API, `<script setup>`) | Requirement; idiomatic, first-class TypeScript |
+| Styling | Tailwind CSS 3 | Requirement |
+| Language | TypeScript 5 | Type safety |
+| Routing | Vue Router 4 | Official Vue router, explicit route config |
+| State | Pinia | Official Vue store; keeps the auth/domain/UI store split |
+| Forms | VeeValidate 4 + Zod | Schema-based validation, per-field errors, server-error mapping |
+| HTTP | Native fetch | No extra dependency |
+| Realtime | @microsoft/signalr | Official SignalR client |
+| Desktop | Tauri 2 | Native desktop wrapper |
+| Testing | Vitest + Vue Test Utils + jsdom | Vite-native |
+| Linting | ESLint (eslint-plugin-vue) + Prettier | Code quality |
+
+Scaffold with `npm create vue@latest` (TypeScript, Vue Router, Pinia, Vitest, ESLint, Prettier options selected).
+
+---
+
+## 3. Directory layout
+
+```text
+apps/desktop/
+├── src/
+│   ├── app/
+│   │   ├── App.vue               # Root: global error handler, router-view
+│   │   ├── router.ts             # Route definitions + guards
+│   │   └── layouts/
+│   │       ├── AuthLayout.vue    # Unauthenticated (login/register)
+│   │       └── BoardLayout.vue   # Authenticated (sidebar + canvas)
+│   ├── features/
+│   │   ├── auth/
+│   │   │   ├── components/
+│   │   │   │   ├── LoginForm.vue
+│   │   │   │   └── RegisterForm.vue
+│   │   │   ├── composables/
+│   │   │   │   └── useAuth.ts
+│   │   │   └── index.ts
+│   │   ├── boards/
+│   │   │   ├── components/
+│   │   │   │   ├── BoardList.vue
+│   │   │   │   ├── BoardCard.vue
+│   │   │   │   ├── CreateBoardDialog.vue
+│   │   │   │   └── BoardHeader.vue
+│   │   │   ├── composables/
+│   │   │   │   ├── useBoards.ts
+│   │   │   │   └── useBoard.ts
+│   │   │   └── index.ts
+│   │   ├── notes/
+│   │   │   ├── components/
+│   │   │   │   ├── NoteCanvas.vue
+│   │   │   │   ├── PostItCard.vue
+│   │   │   │   ├── PostItEditor.vue
+│   │   │   │   └── ColorPicker.vue
+│   │   │   ├── composables/
+│   │   │   │   ├── useNotes.ts
+│   │   │   │   └── useDragNote.ts
+│   │   │   └── index.ts
+│   │   └── members/
+│   │       ├── components/
+│   │       │   ├── MemberList.vue
+│   │       │   ├── AddMemberDialog.vue
+│   │       │   └── RoleSelect.vue
+│   │       ├── composables/
+│   │       │   └── useMembers.ts
+│   │       └── index.ts
+│   ├── shared/
+│   │   ├── components/
+│   │   │   ├── ui/
+│   │   │   │   ├── Button.vue
+│   │   │   │   ├── Input.vue
+│   │   │   │   ├── Dialog.vue
+│   │   │   │   ├── Toast.vue
+│   │   │   │   ├── Spinner.vue
+│   │   │   │   └── ErrorFallback.vue
+│   │   │   └── layout/
+│   │   │       ├── Sidebar.vue
+│   │   │       └── Header.vue
+│   │   ├── composables/
+│   │   │   ├── useApi.ts
+│   │   │   ├── useSignalR.ts
+│   │   │   └── useDebounce.ts
+│   │   ├── services/
+│   │   │   ├── api.ts
+│   │   │   ├── signalr.ts
+│   │   │   └── token.ts
+│   │   ├── validation/
+│   │   │   └── schemas.ts        # Zod schemas (shared with VeeValidate)
+│   │   └── types/
+│   │       ├── api.ts
+│   │       └── index.ts
+│   ├── stores/
+│   │   ├── authStore.ts          # Pinia: useAuthStore
+│   │   ├── boardStore.ts         # Pinia: useBoardStore
+│   │   └── uiStore.ts            # Pinia: useUIStore
+│   ├── main.ts
+│   └── index.css
+├── public/
+├── index.html
+├── package.json
+├── tsconfig.json
+├── tsconfig.node.json
+├── tailwind.config.js
+├── postcss.config.js
+├── vite.config.ts
+└── src-tauri/
+    ├── Cargo.toml
+    ├── tauri.conf.json
+    ├── capabilities/
+    │   └── default.json
+    └── src/
+        └── lib.rs
+```
+
+---
+
+## 4. Type system
+
+All TypeScript types mirror the backend DTOs exactly. GUIDs are strings in JSON.
+
+```text
+// src/shared/types/api.ts
+
+// Auth
+RegisterRequest    { email, password, displayName }
+LoginRequest       { email, password }
+LoginResponse      { accessToken, refreshToken, expiresAt }
+RefreshRequest     { refreshToken }
+MeResponse         { id, email, displayName }
+
+// Boards
+BoardDto           { id, name, createdBy, createdAt, updatedAt }
+CreateBoardRequest { name }
+UpdateBoardRequest { name }
+
+// Members
+BoardMemberDto     { userId, email, displayName, role, createdAt }
+AddMemberRequest   { email, role }           // role: "Editor" | "Viewer"
+UpdateMemberRequest { role }                 // role: "Editor" | "Viewer"
+
+// Notes
+NoteDto            { id, boardId, createdBy?, content, color, positionX, positionY, createdAt, updatedAt }
+CreateNoteRequest  { content, color, positionX, positionY }
+UpdateNoteRequest  { content, color, positionX, positionY }
+
+// Errors
+ProblemDetails     { type?, title?, status, detail?, errors? }
+```
+
+Roles:
+- `BoardRole` = `"Owner" | "Editor" | "Viewer"`
+- `AssignableRole` = `"Editor" | "Viewer"` (Owner not assignable by clients)
+
+Validation constraints (frontend reference):
+- Board Name: required, max 200 chars
+- Note Content: required, max 1000 chars
+- Note Color: required, max 50 chars
+- Member Role: must be valid AssignableRole
+- Auth fields: email required + valid format, password required, displayName required (register)
+
+These constraints are encoded once as Zod schemas (§5) and are the only client-side validation source of truth.
+---
+
+## 5. Forms and validation (VeeValidate + Zod)
+
+### Zod schemas as single source of truth
+
+`src/shared/validation/schemas.ts` holds one Zod schema per form/DTO use case. Schemas mirror the constraints in §4 and are consumed by:
+
+- **VeeValidate** via `toTypedSchema(zodSchema)` — one validation definition drives the whole form
+- **unit tests** — schemas reject invalid input (missing fields, over-length, bad role)
+- optional runtime parsing of API payloads (not in MVP)
+
+MVP schemas: `loginSchema`, `registerSchema`, `boardNameSchema`, `noteSchema` (content + color), `memberSchema` (email + role).
+
+### Form pattern
+
+Each form uses VeeValidate's `useForm` + `useField` (Composition API, `<script setup>`):
+
+```text
+const { handleSubmit, errors, setErrors } = useForm({
+  validationSchema: toTypedSchema(loginSchema),
+})
+const onSubmit = handleSubmit((values) => auth.login(values))
+```
+
+Rules:
+- validate on submit by default; blur validation on longer forms (register, add member) is optional polish
+- disable the submit button while the submission is pending (no double submits)
+- never bypass the schema with ad-hoc checks — if a rule changes, change the Zod schema
+- shared `Input.vue` renders VeeValidate field state (value, errors, touched) so every form looks consistent
+
+### Server error mapping
+
+- **400 with `errors` dictionary** (ValidationProblemDetails) → map keys into VeeValidate `setErrors({ field: message })`
+- **400 with `detail` only** (ArgumentException messages: board name, content, color) → form-level error or toast (§13)
+- **404 / 409** (member email not found, already a member, duplicate registration) → field error on the relevant field where sensible (email), otherwise toast
+- **401 invalid credentials** → form-level error on the login form, not a toast
+
+---
+
+## 6. API client
+
+### Design
+
+Single typed `apiClient<T>(method, path, body?)` wrapping native `fetch`.
+
+Flow:
+1. Get accessToken from auth store
+2. Set Authorization + Content-Type headers
+3. Call fetch with base URL + path
+4. If 401: attempt token refresh, retry once
+5. If 204: return undefined
+6. If not ok: parse ProblemDetails, throw ApiError
+7. Return parsed JSON as T
+
+```text
+class ApiError extends Error {
+  status: number
+  problem: ProblemDetails
+}
+```
+
+### Token management
+
+| Concern | Storage | Rationale |
+|---------|---------|-----------|
+| Access token | Memory only | Short-lived (15 min), prevents XSS |
+| Refresh token | localStorage | Survives restarts, 7-day lifetime |
+
+Functions: `getAccessToken`, `setAccessToken`, `getRefreshToken`, `setRefreshToken`, `clearTokens`
+
+### Typed endpoints
+
+```text
+Auth:     POST /api/auth/register, login, refresh, logout; GET /api/auth/me
+Boards:   GET/POST /api/boards; GET/PUT/DELETE /api/boards/{id}
+Members:  GET/POST /api/boards/{id}/members; PUT/DELETE /api/boards/{id}/members/{userId}
+Notes:    GET/POST /api/boards/{id}/notes; PUT/DELETE /api/notes/{noteId}
+```
+
+---
+
+## 7. Authentication
+
+### Auth store (Pinia)
+
+```text
+// src/stores/authStore.ts
+interface AuthState {
+  user: MeResponse | null
+  isAuthenticated: boolean
+  isLoading: boolean    // checking refresh token on app start
+}
+
+// Actions: login, register, logout, refreshUser, setTokens, setUser, clearAuth, setLoading
+```
+
+### App start flow
+
+1. Check if refresh token exists in localStorage
+2. If yes: call /api/auth/refresh
+3. If refresh succeeds: call /api/auth/me, populate user
+4. If refresh fails: clear tokens, show login
+5. If no refresh token: show login immediately
+
+### 401 recovery
+
+1. API client intercepts 401
+2. Attempt token refresh automatically
+3. If refresh succeeds: retry original request (once)
+4. If refresh fails: clear auth, redirect to login
+
+---
+
+## 8. State management
+
+### Pinia stores
+
+**Auth store** (`useAuthStore`):
+```text
+user, accessToken, refreshToken, isLoading
+Actions: setTokens, setUser, clearAuth, setLoading
+```
+
+**Board store** (`useBoardStore`, domain data, no persistence):
+```text
+boards, activeBoard, members, isLoading
+Actions: setBoards, setActiveBoard, setMembers, updateBoard, removeBoard, addMember, removeMember
+```
+
+**UI store** (`useUIStore`, transient):
+```text
+sidebarOpen, toasts, activeModal
+Actions: toggleSidebar, addToast, removeToast, openModal, closeModal
+```
+
+### Why this split
+
+- Auth store: owns token lifecycle and isAuthenticated; consumed by router guards and layout rendering
+- Board store: domain data shared across boards/notes/members features without prop drilling
+- UI store: transient UI state (sidebar, toasts, modals) isolated from domain reactivity
+- Components read state via `storeToRefs` and call actions; stores never import components
+
+---
+
+## 9. Routing
+
+### Route tree
+
+```text
+/
+├── /login          AuthLayout > LoginForm
+├── /register       AuthLayout > RegisterForm
+├── /               BoardLayout (protected)
+│   ├── index        BoardList
+│   └── /boards/:boardId
+│       ├── index    NoteCanvas
+│       └── /members MemberList
+└── *               Navigate to /
+```
+
+### Route guards
+
+Implemented as a global `router.beforeEach` guard:
+
+- isLoading: await auth check on first navigation (show spinner)
+- route requires auth and !isAuthenticated: redirect to /login
+- guest-only route and isAuthenticated: redirect to /
+- otherwise: render children
+
+No lazy loading for MVP.
+---
+
+## 10. Layouts
+
+### AuthLayout
+
+```text
+┌──────────────────────────────┐
+│                              │
+│      ┌──────────────┐        │
+│      │    Logo      │        │
+│      │  [LoginForm] │        │
+│      │  Register    │        │
+│      └──────────────┘        │
+│                              │
+└──────────────────────────────┘
+```
+
+### BoardLayout
+
+```text
+┌─────────┬──────────────────────────────────┐
+│ Sidebar │  Header (board name, actions)     │
+│         ├──────────────────────────────────┤
+│ Boards  │                                  │
+│ list    │  Content area                    │
+│         │  (NoteCanvas or MemberList)      │
+└─────────┴──────────────────────────────────┘
+```
+
+---
+
+## 11. SignalR realtime
+
+### Connection
+
+```text
+class BoardSignalRService {
+  connect to /hubs/board with JWT via query string
+  auto-reconnect with exponential backoff
+  joinBoard(boardId) / leaveBoard(boardId)
+  onPostItCreated(note: NoteDto)
+  onPostItUpdated(note: NoteDto)
+  onPostItDeleted(noteId: string)
+}
+```
+
+### Lifecycle
+
+On board canvas mount (`onMounted`):
+1. Start connection (if not connected)
+2. joinBoard(boardId)
+3. Register event handlers
+
+On board canvas unmount (`onUnmounted`):
+1. leaveBoard(boardId)
+2. Unregister handlers
+3. Keep connection alive (don't stop)
+
+### Optimistic updates
+
+**Drag-and-drop:**
+1. Move note locally in store immediately
+2. Send PUT /api/notes/{noteId}
+3. On success: no-op
+4. On failure: revert position, show error toast
+
+**Create/delete:**
+1. Create: add to store, send POST. On failure, remove.
+2. Delete: remove from store, send DELETE. On failure, re-add.
+
+---
+
+## 12. Feature modules
+
+### Auth
+
+| Component | Responsibility |
+|-----------|---------------|
+| LoginForm | VeeValidate form (`loginSchema`): email + password, submit calls login(), shows field + form-level errors |
+| RegisterForm | VeeValidate form (`registerSchema`): email + password + displayName, submit calls register(), shows field + form-level errors |
+| useAuth | Auth state + actions from auth store |
+
+### Boards
+
+| Component | Responsibility |
+|-----------|---------------|
+| BoardList | Fetches boards, renders BoardCard for each, "Create Board" button |
+| BoardCard | Board name, member count, created date. Click navigates to board |
+| CreateBoardDialog | Modal with VeeValidate name field (`boardNameSchema`, ≤200), POST /api/boards |
+| BoardHeader | Active board name, edit/delete (Owner only), member count badge |
+| useBoards | Fetch boards, handle create/update/delete |
+
+### Notes
+
+| Component | Responsibility |
+|-----------|---------------|
+| NoteCanvas | Main board area, renders PostItCard instances, drag-and-drop, double-click to create |
+| PostItCard | Single Post-it: content, color, position, draggable, edit/delete |
+| PostItEditor | Inline editor for content + color, validated with `noteSchema` on save (≤1000 / ≤50). Save on blur/Enter, cancel on Escape |
+| ColorPicker | Predefined color palette (8-10 sticky note colors) |
+| useNotes | Fetch notes, handle CRUD, subscribe to SignalR events |
+| useDragNote | Drag state, throttled position updates, optimistic updates |
+
+Canvas behavior:
+- Notes absolutely positioned within scrollable container
+- Position in pixels (matching backend positionX/positionY)
+- Canvas larger than viewport, scrollable both directions
+- New notes spawn at center of visible viewport
+
+### Members
+
+| Component | Responsibility |
+|-----------|---------------|
+| MemberList | Members with role badges. Owner-only actions visible. |
+| AddMemberDialog | VeeValidate form (`memberSchema`: email + role selector), POST /api/boards/{id}/members |
+| RoleSelect | Dropdown to change role (Editor/Viewer). Owner not changeable. |
+| useMembers | Fetch members, handle add/update/remove |
+
+Authorization-aware rendering:
+- Owner: add member, change role, remove member
+- Editor: member list (read-only)
+- Viewer: member list (read-only)
+
+### Shared UI
+
+| Component | Responsibility |
+|-----------|---------------|
+| Button | Primary/secondary/ghost variants, loading, disabled |
+| Input | Label, error state, placeholder, password variant; integrates with VeeValidate field state |
+| Dialog | Modal overlay, title, content. Uses dialog element. |
+| Toast | Non-blocking notification, auto-dismiss 3s, success/error/info |
+| Spinner | Loading indicator, centered or inline |
+| ErrorFallback | Fallback UI shown by the global error handler with retry |
+| Sidebar | Board list navigation, collapsible |
+| Header | Board name, actions, member count |
+
+---
+
+## 13. Error handling
+
+### Four layers
+
+1. **API Client**: intercepts responses, parses ProblemDetails, throws ApiError, handles 401
+2. **Feature composables**: catch ApiError, map status to messages, add toast
+3. **Forms**: VeeValidate validates client-side via Zod; server validation errors (400 `errors` dictionary) are mapped into field errors (§5)
+4. **Global error handler**: `app.config.errorHandler` + `onErrorCaptured` at app root catches unhandled errors, shows ErrorFallback UI with retry
+
+### Status mapping
+
+```text
+400 → "Invalid input: {detail}"        (or field errors via §5)
+401 → "Session expired, please log in again"
+403 → "You don't have permission for this action"
+404 → "Resource not found"
+409 → "This action conflicts with current state"
+500 → "Something went wrong. Please try again."
+```
+---
+
+## 14. Testing
+
+### Strategy
+
+| Layer | Tool | What to test |
+|-------|------|-------------|
+| Unit | Vitest | Store logic, token management, API client errors, Zod schemas |
+| Component | Vitest + Vue Test Utils | Form submissions (VeeValidate), rendering with props, error states |
+| Integration | Vitest + Vue Test Utils | Full flows: login → board list → create board → navigate |
+| E2E | (deferred) | Full app flow in Tauri. Not in MVP. |
+
+Test setup: each test installs the needed plugins (Pinia — `@pinia/testing` `createTestingPinia` for store isolation — and Vue Router) via Vue Test Utils `global.plugins`.
+
+### File convention
+
+```text
+features/notes/
+├── components/
+│   ├── NoteCanvas.vue
+│   └── NoteCanvas.test.ts
+├── composables/
+│   ├── useNotes.ts
+│   └── useNotes.test.ts
+```
+
+### Not tested in MVP
+
+- SignalR connection (test via integration)
+- Tauri-specific APIs (test web version first)
+- Visual styling (manual QA)
+
+---
+
+## 15. Tauri configuration
+
+### tauri.conf.json
+
+```json
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "PostIt",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ]
+  }
+}
+```
+
+### Vite proxy
+
+```text
+/api → https://localhost:5001 (secure: false)
+/hubs → https://localhost:5001 (ws: true, secure: false)
+```
+
+Base path: `"./"` for Tauri compatibility.
+
+---
+
+## 16. Development workflow
+
+```bash
+# Terminal 1: Backend
+cd apps/server/src/PostIt.Api && dotnet run
+
+# Terminal 2: Frontend (Tauri dev)
+cd apps/desktop && npm run tauri dev
+```
+
+Build commands:
+```bash
+npm run dev          # Vite dev server (browser)
+npm run tauri dev    # Vite + Tauri window (desktop)
+npm run build        # Vite build → dist/
+npm run tauri build  # Platform-specific binaries
+npm test             # Vitest
+```
+
+---
+
+## 17. Known backend gaps (frontend awareness)
+
+1. SignalR JoinBoard only checks authentication, not board membership. Frontend should not rely on this for security.
+2. Note content validated at 1000 chars app-level, but EF config allows 2000. Frontend should enforce 1000.
+3. AuthService.RegisterAsync creates User twice. If touching auth, clean up.
+
+---
+
+## 18. Explicitly out of scope for frontend MVP
+
+- Comments on notes
+- File attachments
+- Offline support / sync
+- Advanced search
+- Notifications (push/email)
+- Public share links
+- Version history
+- Analytics
+- E2E tests
+- Performance optimization beyond basics
+---
+
+## 19. Implementation phases
+
+### Phase 1 — Project skeleton
+
+Tasks:
+- wipe the orphaned React remnants in `apps/desktop/` (`package-lock.json`, `node_modules/`, `dist/`)
+- scaffold with `npm create vue@latest` (TypeScript, Vue Router, Pinia, Vitest, ESLint, Prettier)
+- configure Tailwind CSS
+- set up Tauri 2 (src-tauri/)
+- configure path aliases (@/ → src/)
+- configure Vite proxy for /api and /hubs
+- create directory structure
+- verify ESLint + Prettier
+
+Acceptance criteria:
+- `npm run dev` starts Vite dev server
+- `npm run tauri dev` opens Tauri window with hot reload
+- Tailwind classes work
+
+Commit:
+```text
+chore: initialize frontend project
+```
+
+---
+
+### Phase 2 — Shared layer
+
+Tasks:
+- implement TypeScript types (types/api.ts)
+- implement Zod schemas (validation/schemas.ts) mirroring §4 constraints
+- implement token management (services/token.ts)
+- implement apiClient with error handling and token refresh (services/api.ts)
+- implement ApiError class
+- build shared UI components: Button, Input, Dialog, Toast, Spinner, ErrorFallback
+- implement Pinia stores: authStore, boardStore, uiStore
+- set up VeeValidate (register `useForm`/`useField`, `toTypedSchema` convention)
+- implement useDebounce composable
+
+Acceptance criteria:
+- apiClient can make typed requests
+- Token refresh works automatically on 401
+- UI components render with correct variants
+- Pinia stores are functional
+- Zod schemas reject invalid input in unit tests
+
+Commit:
+```text
+feat: add shared layer (types, api client, ui components, stores)
+```
+
+---
+
+### Phase 3 — Authentication
+
+Tasks:
+- implement auth store actions and `useAuth` composable
+- build LoginForm component (VeeValidate + `loginSchema`)
+- build RegisterForm component (VeeValidate + `registerSchema`)
+- build AuthLayout
+- implement route guards (`router.beforeEach`)
+- set up Vue Router with /login and /register routes
+- test auth flow end-to-end
+
+Acceptance criteria:
+- user can register with email/password/displayName
+- user can login and receive tokens
+- user sees /api/auth/me data after login
+- invalid input shows inline field errors without submitting (VeeValidate)
+- invalid credentials show a form-level error
+- protected routes redirect to /login when unauthenticated
+- refresh token persists across app restarts
+- 401 during session triggers automatic refresh
+
+Commit:
+```text
+feat: add authentication
+```
+
+---
+
+### Phase 4 — Boards
+
+Tasks:
+- implement useBoards composable (fetch, create, update, delete)
+- implement useBoard composable (single board)
+- build BoardList component
+- build BoardCard component
+- build CreateBoardDialog component (VeeValidate + `boardNameSchema`)
+- build BoardHeader component
+- build Sidebar component (board list navigation)
+- build Header component
+- build BoardLayout (sidebar + header + content area)
+- add /boards/:boardId routes to the router
+
+Acceptance criteria:
+- authenticated user sees their boards
+- user can create a new board
+- board name over 200 chars is rejected client-side with an inline error
+- user can navigate to a board
+- user can rename a board (Owner only)
+- user can delete a board (Owner only)
+- board list updates after create/delete
+- unauthorized actions are hidden/disabled
+
+Commit:
+```text
+feat: add boards
+```
+
+---
+
+### Phase 5 — Notes (core)
+
+Tasks:
+- implement useNotes composable (fetch, create, update, delete)
+- implement useDragNote composable (drag state, throttled updates, optimistic)
+- build NoteCanvas component (scrollable, absolutely positioned notes)
+- build PostItCard component (content, color, draggable)
+- build PostItEditor component (inline edit, `noteSchema` validation, save on blur/Enter)
+- build ColorPicker component (predefined palette)
+- add double-click-to-create on canvas
+- implement optimistic updates for drag-and-drop
+- implement optimistic updates for create/delete
+
+Acceptance criteria:
+- notes load for a board
+- user can create a note (double-click)
+- user can edit note content and color
+- content over 1000 chars is rejected client-side with an inline error
+- user can drag notes to reposition
+- user can delete notes
+- position changes persist to backend
+- notes survive app restart
+- concurrent changes via SignalR update the canvas (Phase 7 will refine)
+
+Commit:
+```text
+feat: add notes canvas
+```
+
+---
+
+### Phase 6 — Members
+
+Tasks:
+- implement useMembers composable (fetch, add, update role, remove)
+- build MemberList component
+- build AddMemberDialog component (VeeValidate + `memberSchema`)
+- build RoleSelect component
+- implement authorization-aware rendering (Owner/Editor/Viewer)
+- add /boards/:boardId/members route
+
+Acceptance criteria:
+- Owner can view member list
+- Owner can add a member by email
+- Owner can change member role
+- Owner can remove a member
+- Owner cannot be removed
+- Editor sees member list (read-only)
+- Viewer sees member list (read-only)
+- duplicate member is rejected with an error
+- invalid email/role shows inline field errors client-side
+- invalid role is rejected by the backend
+
+Commit:
+```text
+feat: add board members
+```
+
+---
+
+### Phase 7 — Realtime
+
+Tasks:
+- implement BoardSignalRService (connect, reconnect, join/leave)
+- wire PostItCreated event to notes store
+- wire PostItUpdated event to notes store
+- wire PostItDeleted event to notes store
+- join board group on canvas `onMounted`
+- leave board group on canvas `onUnmounted`
+- handle connection state (connected/disconnected/reconnecting)
+- add connection status indicator in UI
+
+Acceptance criteria:
+- user connects to SignalR on board canvas mount
+- user joins board group
+- note created by another user appears in real-time
+- note updated by another user updates in real-time
+- note deleted by another user is removed in real-time
+- connection loss shows status indicator
+- reconnection works automatically
+
+Commit:
+```text
+feat: add realtime board collaboration
+```
+
+---
+
+### Phase 8 — Polish
+
+Tasks:
+- integrate global error handler (`app.config.errorHandler` + `onErrorCaptured`) at app root
+- add loading states (spinners) for all async operations
+- add empty states (no boards, no notes, no members)
+- add toast notifications for all success/error flows
+- adjust layout for Tauri window sizes
+- add keyboard shortcuts (Escape to close dialogs, etc.)
+- final cleanup and code review
+
+Acceptance criteria:
+- all loading states show spinners
+- all error states show toasts
+- empty states have helpful messages
+- app looks correct at 800x600 and 1280x800
+- no console errors
+- `npm run build` succeeds
+- all tests pass
+
+Commit:
+```text
+feat: polish frontend MVP
+```
+
+---
+
+## 20. Frontend MVP acceptance criteria
+
+Frontend MVP is complete only when all of these are true:
+
+- [ ] Vite project initializes and builds
+- [ ] Tauri window opens with hot reload
+- [ ] Tailwind CSS works
+- [ ] User can register
+- [ ] User can login
+- [ ] Token refresh works automatically
+- [ ] Invalid input shows inline field errors (VeeValidate + Zod)
+- [ ] Client-side limits mirror backend (board 200 / content 1000 / color 50)
+- [ ] User sees their boards
+- [ ] User can create a board
+- [ ] User can navigate to a board
+- [ ] User can rename/delete a board (Owner)
+- [ ] Notes load for a board
+- [ ] User can create a note (double-click)
+- [ ] User can edit note content and color
+- [ ] User can drag notes to reposition
+- [ ] User can delete notes
+- [ ] Position changes persist
+- [ ] Members can be added/removed (Owner)
+- [ ] Role changes work (Owner)
+- [ ] Authorization-aware UI (Owner/Editor/Viewer)
+- [ ] SignalR realtime updates work
+- [ ] Connection status indicator shows
+- [ ] Error toasts appear for failures
+- [ ] Loading states show spinners
+- [ ] Empty states show helpful messages
+- [ ] Unit tests pass
+- [ ] Component tests pass
+
+---
+
+## 21. First concrete milestone
+
+The first milestone is intentionally small:
+
+```text
+Vite + Vue 3 + TypeScript
+   +
+Tailwind CSS
+   +
+Tauri 2
+   +
+Project structure
+   +
+Dev server works
+```
+
+Only after this milestone is working should authentication be implemented.
+
+The objective is not to "build the whole frontend" in one pass.
+
+The objective is to establish a solid local foundation and then grow the frontend one verified capability at a time.
