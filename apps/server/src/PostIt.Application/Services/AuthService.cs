@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using PostIt.Application.DTOs;
 using PostIt.Application.Interfaces;
 using PostIt.Domain.Entities;
@@ -10,17 +11,20 @@ public class AuthService : IAuthService
     private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IPasswordHasher _passwordHasher;
     private readonly ITokenService _tokenService;
+    private readonly ILogger<AuthService> _logger;
 
     public AuthService(
         IUserRepository userRepository,
         IRefreshTokenRepository refreshTokenRepository,
         IPasswordHasher passwordHasher,
-        ITokenService tokenService)
+        ITokenService tokenService,
+        ILogger<AuthService> logger)
     {
         _userRepository = userRepository;
         _refreshTokenRepository = refreshTokenRepository;
         _passwordHasher = passwordHasher;
         _tokenService = tokenService;
+        _logger = logger;
     }
 
     public async Task<LoginResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
@@ -32,13 +36,7 @@ public class AuthService : IAuthService
 
         var user = new User(request.Email, string.Empty, request.DisplayName);
         var passwordHash = _passwordHasher.HashPassword(user, request.Password);
-        
-        // Use reflection or recreate - since PasswordHash is private set, 
-        // we can use a trick: the User constructor sets PasswordHash from parameter,
-        // but it doesn't hash it. Wait, looking at User entity:
-        // public User(string email, string passwordHash, string displayName)
-        // So we pass the hash directly.
-        user = new User(request.Email, passwordHash, request.DisplayName);
+        user.SetPasswordHash(passwordHash);
 
         await _userRepository.AddAsync(user, cancellationToken);
 
@@ -51,6 +49,8 @@ public class AuthService : IAuthService
 
         await _refreshTokenRepository.AddAsync(refreshToken, cancellationToken);
 
+        _logger.LogInformation("Registration succeeded | userId={UserId}", user.Id);
+
         return new LoginResponse(accessToken, refreshTokenValue, DateTime.UtcNow.AddMinutes(15));
     }
 
@@ -59,11 +59,13 @@ public class AuthService : IAuthService
         var user = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
         if (user == null)
         {
+            _logger.LogWarning("Login failed | reason=Invalid credentials");
             throw new InvalidOperationException("Invalid email or password.");
         }
 
         if (!_passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password))
         {
+            _logger.LogWarning("Login failed | reason=Invalid credentials");
             throw new InvalidOperationException("Invalid email or password.");
         }
 
@@ -76,6 +78,8 @@ public class AuthService : IAuthService
 
         await _refreshTokenRepository.AddAsync(refreshToken, cancellationToken);
 
+        _logger.LogInformation("Login succeeded | userId={UserId}", user.Id);
+
         return new LoginResponse(accessToken, refreshTokenValue, DateTime.UtcNow.AddMinutes(15));
     }
 
@@ -84,12 +88,14 @@ public class AuthService : IAuthService
         var refreshToken = await _refreshTokenRepository.GetByTokenAsync(request.RefreshToken, cancellationToken);
         if (refreshToken == null || refreshToken.IsRevoked || refreshToken.ExpiresAt < DateTime.UtcNow)
         {
+            _logger.LogWarning("Refresh failed | reason=Invalid or expired refresh token");
             throw new InvalidOperationException("Invalid or expired refresh token.");
         }
 
         var user = await _userRepository.GetByIdAsync(refreshToken.UserId, cancellationToken);
         if (user == null)
         {
+            _logger.LogWarning("Refresh failed | reason=User not found");
             throw new InvalidOperationException("User not found.");
         }
 
@@ -107,6 +113,8 @@ public class AuthService : IAuthService
 
         var accessToken = _tokenService.GenerateAccessToken(user);
 
+        _logger.LogInformation("Refresh succeeded | userId={UserId}", user.Id);
+
         return new LoginResponse(accessToken, newRefreshTokenValue, DateTime.UtcNow.AddMinutes(15));
     }
 
@@ -118,6 +126,8 @@ public class AuthService : IAuthService
             token.Revoke();
             await _refreshTokenRepository.UpdateAsync(token, cancellationToken);
         }
+
+        _logger.LogInformation("Logout completed");
     }
 
     public async Task<MeResponse?> GetMeAsync(Guid userId, CancellationToken cancellationToken = default)

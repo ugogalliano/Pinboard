@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using PostIt.Application.DTOs;
 using PostIt.Application.Interfaces;
@@ -15,7 +16,7 @@ public class BoardServiceTests
 
     public BoardServiceTests()
     {
-        _svc = new BoardService(_boardRepo.Object, _authSvc.Object);
+        _svc = new BoardService(_boardRepo.Object, _authSvc.Object, NullLogger<BoardService>.Instance);
     }
 
     [Fact]

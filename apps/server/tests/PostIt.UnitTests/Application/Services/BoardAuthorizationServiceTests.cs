@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using PostIt.Application.Interfaces;
 using PostIt.Application.Services;
@@ -13,7 +14,7 @@ public class BoardAuthorizationServiceTests
 
     public BoardAuthorizationServiceTests()
     {
-        _svc = new BoardAuthorizationService(_repo.Object);
+        _svc = new BoardAuthorizationService(_repo.Object, NullLogger<BoardAuthorizationService>.Instance);
     }
 
     private void SetupMember(BoardRole? role)

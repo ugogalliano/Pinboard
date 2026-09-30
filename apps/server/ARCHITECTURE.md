@@ -321,4 +321,4 @@ apps/server/
 - **xUnit** — Testing framework
 - **Testcontainers** — Integration test database (with SQLite fallback)
 - **Swagger/OpenAPI** — API documentation
-- **Serilog** — Structured logging
+- **Microsoft.Extensions.Logging** — Structured logging (built-in console, single-line UTC format)

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using PostIt.Application.DTOs;
 using PostIt.Application.Interfaces;
 using PostIt.Domain.Entities;
@@ -9,22 +10,28 @@ public class BoardService : IBoardService
 {
     private readonly IBoardRepository _boardRepository;
     private readonly IBoardAuthorizationService _authorizationService;
+    private readonly ILogger<BoardService> _logger;
 
-    public BoardService(IBoardRepository boardRepository, IBoardAuthorizationService authorizationService)
+    public BoardService(IBoardRepository boardRepository, IBoardAuthorizationService authorizationService, ILogger<BoardService> logger)
     {
         _boardRepository = boardRepository;
         _authorizationService = authorizationService;
+        _logger = logger;
     }
 
     public async Task<BoardDto> CreateBoardAsync(Guid userId, CreateBoardRequest request, CancellationToken cancellationToken = default)
     {
         ValidateName(request.Name);
 
+        _logger.LogInformation("Validation completed");
+
         var board = new Board(request.Name, userId);
         board.Members.Add(new BoardMember(board.Id, userId, BoardRole.Owner));
 
         await _boardRepository.AddAsync(board, cancellationToken);
         await _boardRepository.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Board created | boardId={BoardId}", board.Id);
 
         return MapToDto(board);
     }
@@ -55,6 +62,8 @@ public class BoardService : IBoardService
     {
         ValidateName(request.Name);
 
+        _logger.LogInformation("Validation completed");
+
         var board = await _boardRepository.GetByIdAsync(boardId, cancellationToken);
         if (board == null)
         {
@@ -68,6 +77,8 @@ public class BoardService : IBoardService
 
         board.UpdateName(request.Name);
         await _boardRepository.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Board updated | boardId={BoardId}", board.Id);
 
         return MapToDto(board);
     }
@@ -87,6 +98,8 @@ public class BoardService : IBoardService
 
         await _boardRepository.DeleteAsync(board, cancellationToken);
         await _boardRepository.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Board deleted | boardId={BoardId}", board.Id);
     }
 
     private static void ValidateName(string name)

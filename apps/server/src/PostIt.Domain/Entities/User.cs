@@ -26,4 +26,10 @@ public class User
         DisplayName = displayName;
         UpdatedAt = DateTime.UtcNow;
     }
+
+    public void SetPasswordHash(string passwordHash)
+    {
+        PasswordHash = passwordHash;
+        UpdatedAt = DateTime.UtcNow;
+    }
 }

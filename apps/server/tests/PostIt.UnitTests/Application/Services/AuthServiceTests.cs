@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using PostIt.Application.DTOs;
 using PostIt.Application.Interfaces;
@@ -16,7 +17,7 @@ public class AuthServiceTests
 
     public AuthServiceTests()
     {
-        _svc = new AuthService(_userRepo.Object, _tokenRepo.Object, _hasher.Object, _tokenSvc.Object);
+        _svc = new AuthService(_userRepo.Object, _tokenRepo.Object, _hasher.Object, _tokenSvc.Object, NullLogger<AuthService>.Instance);
     }
 
     [Fact]

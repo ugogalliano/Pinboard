@@ -30,4 +30,18 @@ public class UserTests
         Assert.Equal("New Name", user.DisplayName);
         Assert.True(user.UpdatedAt > originalUpdatedAt);
     }
+
+    [Fact]
+    public void SetPasswordHash_Updates_PasswordHash_And_UpdatedAt()
+    {
+        var user = new User("test@example.com", "hash123", "Test User");
+        var originalUpdatedAt = user.UpdatedAt;
+
+        // Small delay to ensure UpdatedAt changes
+        Thread.Sleep(10);
+        user.SetPasswordHash("newhash");
+
+        Assert.Equal("newhash", user.PasswordHash);
+        Assert.True(user.UpdatedAt > originalUpdatedAt);
+    }
 }

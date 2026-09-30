@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using PostIt.Application.DTOs;
 using PostIt.Application.Interfaces;
@@ -16,7 +17,7 @@ public class NoteServiceTests
 
     public NoteServiceTests()
     {
-        _svc = new NoteService(_noteRepo.Object, _boardRepo.Object, _authSvc.Object, _notificationSvc.Object);
+        _svc = new NoteService(_noteRepo.Object, _boardRepo.Object, _authSvc.Object, _notificationSvc.Object, NullLogger<NoteService>.Instance);
     }
 
     private static Board CreateBoard(Guid boardId)

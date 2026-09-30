@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging.Console;
 using Microsoft.IdentityModel.Tokens;
 using PostIt.Api.Hubs;
+using PostIt.Api.Logging;
 using PostIt.Api.Middleware;
 using PostIt.Api.Services;
 using PostIt.Application;
@@ -57,7 +59,14 @@ builder.Services.AddSwaggerGen(options =>
 
 // Logging
 builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
+builder.Logging.AddConsole(options => options.FormatterName = "colored");
+builder.Services.AddSingleton<ConsoleFormatter, ColoredConsoleFormatter>();
+builder.Services.Configure<SimpleConsoleFormatterOptions>(options =>
+{
+    options.SingleLine = true;
+    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff zzz";
+    options.UseUtcTimestamp = true;
+});
 builder.Logging.AddDebug();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 

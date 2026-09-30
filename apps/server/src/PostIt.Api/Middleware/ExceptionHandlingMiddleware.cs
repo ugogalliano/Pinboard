@@ -20,6 +20,11 @@ public class ExceptionHandlingMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException)
+        {
+            // Client aborted the request — normal, not an error. No log; let the server handle it.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception occurred processing {Method} {Path}",

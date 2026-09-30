@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using PostIt.Application.DTOs;
 using PostIt.Application.Interfaces;
 using PostIt.Domain.Entities;
@@ -10,17 +11,20 @@ public class NoteService : INoteService
     private readonly IBoardRepository _boardRepository;
     private readonly IBoardAuthorizationService _authorizationService;
     private readonly IBoardNotificationService _notificationService;
+    private readonly ILogger<NoteService> _logger;
 
     public NoteService(
         INoteRepository noteRepository,
         IBoardRepository boardRepository,
         IBoardAuthorizationService authorizationService,
-        IBoardNotificationService notificationService)
+        IBoardNotificationService notificationService,
+        ILogger<NoteService> logger)
     {
         _noteRepository = noteRepository;
         _boardRepository = boardRepository;
         _authorizationService = authorizationService;
         _notificationService = notificationService;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<NoteDto>> GetNotesAsync(Guid userId, Guid boardId, CancellationToken cancellationToken = default)
@@ -45,6 +49,8 @@ public class NoteService : INoteService
         ValidateContent(request.Content);
         ValidateColor(request.Color);
 
+        _logger.LogInformation("Validation completed");
+
         if (!await _authorizationService.CanCreateNoteAsync(userId, boardId, cancellationToken))
         {
             throw new UnauthorizedAccessException("Only Owner or Editor can create notes.");
@@ -60,6 +66,8 @@ public class NoteService : INoteService
         await _noteRepository.AddAsync(note, cancellationToken);
         await _noteRepository.SaveChangesAsync(cancellationToken);
 
+        _logger.LogInformation("Note created | noteId={NoteId} boardId={BoardId}", note.Id, boardId);
+
         var noteDto = MapToDto(note);
         await _notificationService.PostItCreated(boardId, noteDto, cancellationToken);
 
@@ -70,6 +78,8 @@ public class NoteService : INoteService
     {
         ValidateContent(request.Content);
         ValidateColor(request.Color);
+
+        _logger.LogInformation("Validation completed");
 
         var note = await _noteRepository.GetByIdAsync(noteId, cancellationToken);
         if (note == null)
@@ -86,6 +96,8 @@ public class NoteService : INoteService
         note.UpdateColor(request.Color);
         note.UpdatePosition(request.PositionX, request.PositionY);
         await _noteRepository.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Note updated | noteId={NoteId} boardId={BoardId}", note.Id, note.BoardId);
 
         var noteDto = MapToDto(note);
         await _notificationService.PostItUpdated(note.BoardId, noteDto, cancellationToken);
@@ -108,6 +120,8 @@ public class NoteService : INoteService
 
         await _noteRepository.DeleteAsync(note, cancellationToken);
         await _noteRepository.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Note deleted | noteId={NoteId} boardId={BoardId}", noteId, note.BoardId);
 
         await _notificationService.PostItDeleted(note.BoardId, noteId, cancellationToken);
     }
