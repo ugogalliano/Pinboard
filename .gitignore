@@ -22,3 +22,15 @@ TestResults/
 
 # NuGet
 *.nupkg
+
+# PromptOps context snapshot
+.promptops/
+
+# PromptOps session assets
+.promptops-assets/
+
+# Build output
+apps/desktop/dist/
+
+# Agent session artifacts
+.superpowers/
