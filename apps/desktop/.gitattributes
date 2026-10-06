@@ -1,0 +1,5 @@
+# AGENTS.md §2: CRLF line endings for this app.
+* text=auto eol=crlf
+*.png binary
+*.ico binary
+*.svg text
