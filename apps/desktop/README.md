@@ -1,54 +1,41 @@
-# postit-tmp
+# PostIt — Desktop Client (`apps/desktop`)
 
-This template should help get you started developing with Vue 3 in Vite.
+The PostIt desktop client: a **Vue 3 + TypeScript + Vite** SPA styled with
+**Tailwind CSS 3**, wrapped by **Tauri 2**. Server state lives in
+`@tanstack/vue-query`, client state in Pinia, forms use VeeValidate + Zod, and
+realtime updates come over SignalR. See `PLAN.FE.md` (repo root) for the full
+design and `AGENTS.md` for the operative conventions.
 
-## Recommended IDE Setup
+## Scripts
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+| Command               | What it does                                            |
+| --------------------- | ------------------------------------------------------- |
+| `npm run dev`         | Vite dev server at http://localhost:5173 (browser mode) |
+| `npm run build`       | `vue-tsc` type-check + production build to `dist/`      |
+| `npm test`            | Vitest unit/component tests (single run)                |
+| `npm run test:unit`   | Vitest (watch mode)                                     |
+| `npm run lint`        | oxlint + ESLint (+ Prettier via config)                 |
+| `npm run format`      | Prettier write for `src/`                               |
+| `npm run tauri dev`   | Vite dev server + Tauri desktop window (hot reload)     |
+| `npm run tauri build` | Platform-specific desktop bundles                       |
 
-## Recommended Browser Setup
+## Backend proxy
 
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
+The dev server proxies `/api` and `/hubs` (WebSocket) to the PostIt API.
+The target is configurable:
 
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
-
-```sh
-npm install
-```
-
-### Compile and Hot-Reload for Development
-
-```sh
+```powershell
+$env:VITE_PROXY_TARGET = "https://localhost:7113"   # e.g. per launchSettings profile
 npm run dev
 ```
 
-### Type-Check, Compile and Minify for Production
+Default fallback: `https://localhost:7113` (the actual Kestrel https profile —
+PLAN.FE.md §15 says `5001`; see the note in `vite.config.ts`).
 
-```sh
-npm run build
-```
+## Prerequisites
 
-### Run Unit Tests with [Vitest](https://vitest.dev/)
-
-```sh
-npm run test:unit
-```
-
-### Lint with [ESLint](https://eslint.org/)
-
-```sh
-npm run lint
-```
+- Node.js `^20.19.0 || ^22.18.0 || >=24.0.0` (verified green on 20.20.2).
+- **Rust toolchain (`cargo`) required for `npm run tauri dev` / `tauri build`.**
+  Without it, the CLI fails with
+  `failed to run 'cargo metadata' command ... program not found`. Pure web
+  development (`dev`, `build`, `test`) does not need Rust.
