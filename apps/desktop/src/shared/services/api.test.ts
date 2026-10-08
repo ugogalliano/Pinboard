@@ -6,6 +6,7 @@ import {
   isApiError,
   mapApiErrorStatus,
   mapApiErrorToMessage,
+  mapProblemErrors,
 } from './api'
 import {
   clearTokens,
@@ -185,7 +186,8 @@ describe('apiClient', () => {
   })
 
   it('502 with an HTML body synthesizes a safe ProblemDetails and leaks no raw HTML', async () => {
-    const html = '<html><head><title>502 Bad Gateway</title></head><body>nginx internal secret</body></html>'
+    const html =
+      '<html><head><title>502 Bad Gateway</title></head><body>nginx internal secret</body></html>'
     vi.stubGlobal(
       'fetch',
       vi.fn<FetchImpl>(async () => textResponse(502, html)),
@@ -334,6 +336,174 @@ describe('apiClient', () => {
     expect(localStorage.getItem('postit.refreshToken')).toBeNull()
     // Refresh never succeeded, so the original request is NOT retried.
     expect(callsTo('/api/boards')).toHaveLength(1)
+  })
+  it('401 on /api/auth/login surfaces directly — NO refresh attempt', async () => {
+    setRefreshToken('r1')
+
+    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
+      const call = track(url, init)
+      if (call.url === '/api/auth/refresh') {
+        // Would "succeed" if attempted — the point is it must never be called.
+        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
+      }
+      return jsonResponse(401, { status: 401, title: 'Unauthorized', detail: 'bad credentials' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const error = await apiClient('POST', '/api/auth/login', {
+      email: 'a@b.co',
+      password: 'wrong',
+    }).catch((e: unknown) => e)
+
+    expect(isApiError(error)).toBe(true)
+    expect((error as ApiError).status).toBe(401)
+    expect(callsTo('/api/auth/login')).toHaveLength(1)
+    expect(callsTo('/api/auth/refresh')).toHaveLength(0)
+    // Tokens are untouched — a failed login must not clear the stored session.
+    expect(getRefreshToken()).toBe('r1')
+  })
+
+  it('401 on /api/auth/register also skips the refresh cycle', async () => {
+    setRefreshToken('r1')
+
+    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
+      const call = track(url, init)
+      if (call.url === '/api/auth/refresh') {
+        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
+      }
+      return jsonResponse(401, { status: 401 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiClient('POST', '/api/auth/register', { email: 'a@b.co' })).rejects.toThrow(
+      ApiError,
+    )
+    expect(callsTo('/api/auth/refresh')).toHaveLength(0)
+  })
+
+  it('GET /api/auth/me keeps the refresh+retry cycle (stale access token mid-session)', async () => {
+    setAccessToken('stale')
+    setRefreshToken('r1')
+
+    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
+      const call = track(url, init)
+      if (call.url === '/api/auth/refresh') {
+        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
+      }
+      if (callsTo('/api/auth/me').length === 1) {
+        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
+      }
+      return jsonResponse(200, { id: 'u1', email: 'a@b.co', displayName: 'Ada' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const me = await apiClient<{ id: string }>('GET', '/api/auth/me')
+
+    expect(me).toEqual({ id: 'u1', email: 'a@b.co', displayName: 'Ada' })
+    expect(callsTo('/api/auth/refresh')).toHaveLength(1)
+    expect(callsTo('/api/auth/me')).toHaveLength(2)
+  })
+
+  it('GET /api/auth/me?with-query keeps the refresh cycle (match ignores query string)', async () => {
+    setAccessToken('stale')
+    setRefreshToken('r1')
+
+    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
+      const call = track(url, init)
+      if (call.url === '/api/auth/refresh') {
+        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
+      }
+      if (callsTo('/api/auth/me?fields=full').length === 1) {
+        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
+      }
+      return jsonResponse(200, { id: 'u1' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiClient('GET', '/api/auth/me?fields=full')).resolves.toEqual({ id: 'u1' })
+    expect(callsTo('/api/auth/refresh')).toHaveLength(1)
+  })
+
+  it('POST /api/auth/me (non-GET) skips the refresh cycle — exemption is GET-only', async () => {
+    setRefreshToken('r1')
+
+    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
+      track(url, init)
+      if (url === '/api/auth/refresh') {
+        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
+      }
+      return jsonResponse(401, { status: 401, title: 'Unauthorized' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiClient('POST', '/api/auth/me')).rejects.toThrow(ApiError)
+    expect(callsTo('/api/auth/refresh')).toHaveLength(0)
+  })
+
+  it('a terminal refresh failure notifies the session bus (full logout hook)', async () => {
+    const { onSessionTerminated, clearSessionTerminatedHandlers } = await import('./session')
+    setAccessToken('stale')
+    setRefreshToken('r1')
+    const handler = vi.fn<() => void>()
+    onSessionTerminated(handler)
+
+    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
+      const call = track(url, init)
+      if (call.url === '/api/auth/refresh') {
+        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
+      }
+      return jsonResponse(401, { status: 401, title: 'Unauthorized' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiClient('GET', '/api/boards')).rejects.toThrow(ApiError)
+    expect(handler).toHaveBeenCalledTimes(1)
+    clearSessionTerminatedHandlers()
+  })
+
+  it('a normal (non-auth) endpoint still refreshes and retries on 401', async () => {
+    setAccessToken('stale')
+    setRefreshToken('r1')
+
+    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
+      const call = track(url, init)
+      if (call.url === '/api/auth/refresh') {
+        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
+      }
+      if (callsTo('/api/boards').length === 1) {
+        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
+      }
+      return jsonResponse(200, BOARDS)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiClient<BoardDto[]>('GET', '/api/boards')).resolves.toEqual(BOARDS)
+    expect(callsTo('/api/auth/refresh')).toHaveLength(1)
+  })
+})
+
+describe('mapProblemErrors', () => {
+  it('lowercases PascalCase/dotted keys to field names and keeps the first message', () => {
+    expect(
+      mapProblemErrors({
+        status: 400,
+        errors: {
+          Email: ['Email is already taken', 'second'],
+          'RegisterRequest.Password': ['Password is too short'],
+        },
+      }),
+    ).toEqual({
+      email: 'Email is already taken',
+      password: 'Password is too short',
+    })
+  })
+
+  it('drops entries without a usable message', () => {
+    expect(mapProblemErrors({ status: 400, errors: { Name: [] } })).toEqual({})
+  })
+
+  it('returns an empty record when the problem has no errors dict', () => {
+    expect(mapProblemErrors({ status: 400, detail: 'Invalid input' })).toEqual({})
   })
 })
 

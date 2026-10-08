@@ -35,9 +35,10 @@ Key mechanics:
   `['boards', boardId, 'members']`). Reads use `useQuery`, mutations use
   `useMutation` with the cycle optimistic write (`onMutate`) → rollback
   (`onError`) → invalidate (`onSettled`). Never mirror query data into Pinia.
-- **Client state**: Pinia — `authStore` (tokens, user) and `uiStore` (toasts,
-  sidebar, modals). `activeBoard` derives from the `:boardId` route param, not
-  from a store.
+- **Client state**: Pinia — `authStore` (tokens, user) and `uiStore` (sidebar,
+  modals). Notifications are NOT store state: the design system owns toasts
+  (`useToast()` + `<Toaster />`). `activeBoard` derives from the `:boardId`
+  route param, not from a store.
 - **Validation**: VeeValidate + Zod. Schemas in `shared/validation/schemas.ts`
   are the single source of truth, mirroring backend limits (board name ≤200,
   note content ≤1000, note color ≤50, role ∈ {Editor, Viewer}) — see §4.
@@ -167,7 +168,7 @@ Two stores plus the query cache — server data never lands in Pinia:
 |-------|------|-------------|
 | **Vue Query cache** | boards, notes, members (`useQuery` reads, `useMutation` writes, SignalR `setQueryData`) | in-memory cache; cleared on logout via `queryClient.clear()` |
 | `authStore` | user, accessToken, refreshToken, isLoading; login/register/logout/refresh actions | refresh token in localStorage (via `token.ts`), access token memory only |
-| `uiStore` | sidebarOpen, toasts, activeModal; transient actions | none |
+| `uiStore` | sidebarOpen, activeModal; transient actions (toasts live in the design system's `useToast()`, not here) | none |
 
 Rules:
 - Components read Pinia state with `storeToRefs` and query state via

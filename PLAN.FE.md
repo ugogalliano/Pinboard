@@ -238,7 +238,7 @@ Rules:
 - disable the submit button while the submission is pending (no double submits)
 - never bypass the schema with ad-hoc checks — if a rule changes, change the Zod schema
 - shared `Input.vue` renders VeeValidate field state (value, errors, touched) so every form looks consistent
-- submissions go through a `useMutation` (§8) — forms never call apiClient directly
+- submissions go through a `useMutation` (§8) — forms never call apiClient directly (exception: auth submissions stay store actions (§7), not `useMutation` — they manage tokens, not cacheable server state)
 
 ### Server error mapping
 
@@ -357,9 +357,11 @@ Actions: setTokens, setUser, clearAuth, setLoading (+ login/register/logout/refr
 
 **UI store** (`useUIStore`, transient):
 ```text
-sidebarOpen, toasts, activeModal
-Actions: toggleSidebar, addToast, removeToast, openModal, closeModal
+sidebarOpen, activeModal
+Actions: toggleSidebar, openModal, closeModal
 ```
+
+Toasts are owned by the design system (`useToast()` + `<Toaster />`) — module-level global store, not Pinia state (Phase 3 decision A).
 
 ### Why this split
 

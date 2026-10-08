@@ -1,0 +1,152 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { createMemoryHistory } from 'vue-router'
+
+import { createAppRouter } from '@/app/router'
+import { useAuthStore } from '@/stores/authStore'
+import { getAccessToken, setAccessToken, setRefreshToken } from '@/shared/services/token'
+import type { LoginResponse, MeResponse } from '@/shared/types/api'
+
+type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
+
+const NEW_TOKENS: LoginResponse = {
+  accessToken: 'access-new',
+  refreshToken: 'refresh-new',
+  expiresAt: '2026-01-01T00:00:00Z',
+}
+const USER: MeResponse = { id: 'u1', email: 'a@b.co', displayName: 'Ada' }
+
+function jsonResponse(status: number, body: unknown): Response {
+  const text = JSON.stringify(body)
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => text,
+    json: async () => JSON.parse(text) as unknown,
+  } as unknown as Response
+}
+
+function stubRefreshSuccess(calls: string[]): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn<FetchImpl>(async (url) => {
+      calls.push(String(url))
+      if (url === '/api/auth/refresh') return jsonResponse(200, NEW_TOKENS)
+      if (url === '/api/auth/me') return jsonResponse(200, USER)
+      return jsonResponse(500, { status: 500 })
+    }),
+  )
+}
+
+describe('router guard', () => {
+  let calls: string[]
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+    calls = []
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('awaits bootstrap on the first navigation and lets a refreshed session through', async () => {
+    setRefreshToken('refresh-old')
+    const router = createAppRouter(createMemoryHistory())
+
+    stubRefreshSuccess(calls)
+    await router.push('/')
+
+    // Bootstrap ran exactly once (refresh + /me), landing on the protected route.
+    expect(calls).toEqual(['/api/auth/refresh', '/api/auth/me'])
+    expect(router.currentRoute.value.path).toBe('/')
+    expect(useAuthStore().isAuthenticated).toBe(true)
+
+    // A second protected navigation must NOT bootstrap again.
+    await router.push('/register') // guestOnly + authenticated → bounced to /
+    await router.push('/')
+    expect(calls).toHaveLength(2)
+  })
+
+  it('redirects unauthenticated users from the root to /login WITHOUT ?redirect noise', async () => {
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(router.currentRoute.value.query.redirect).toBeUndefined()
+  })
+
+  it('carries ?redirect= for protected deep links where it adds information', async () => {
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/?tab=board')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(router.currentRoute.value.query.redirect).toBe('/?tab=board')
+  })
+
+  it('concurrent first navigations share ONE bootstrap and the second lands authenticated', async () => {
+    setRefreshToken('refresh-old')
+    // Slow bootstrap: the refresh response resolves on a timer so both
+    // guards enter beforeEach while the first one is still awaiting.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<FetchImpl>(async (url) => {
+        calls.push(String(url))
+        if (url === '/api/auth/refresh') {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          return jsonResponse(200, NEW_TOKENS)
+        }
+        if (url === '/api/auth/me') return jsonResponse(200, USER)
+        return jsonResponse(500, { status: 500 })
+      }),
+    )
+
+    const router = createAppRouter(createMemoryHistory())
+    const first = router.push('/')
+    // Second navigation starts while the first guard is mid-bootstrap:
+    // with a boolean flag it would read isAuthenticated=false and bounce
+    // /register to /login; with a shared promise it waits properly.
+    const second = router.push('/register')
+    await Promise.all([first, second])
+
+    // Bootstrap ran exactly once, and being authenticated the guest-only
+    // screen bounced to "/" — NOT to /login.
+    expect(calls.filter((u) => u === '/api/auth/refresh')).toHaveLength(1)
+    expect(router.currentRoute.value.path).toBe('/')
+    expect(useAuthStore().isAuthenticated).toBe(true)
+  })
+
+  it('bounces authenticated users away from guest-only screens to /', async () => {
+    const auth = useAuthStore()
+    // In-memory session only (no refresh token) so bootstrap no-ops quickly.
+    setAccessToken('access-live')
+    auth.setUser(USER)
+
+    const router = createAppRouter(createMemoryHistory())
+    await router.push('/login')
+
+    expect(router.currentRoute.value.path).toBe('/')
+    expect(getAccessToken()).toBe('access-live')
+  })
+
+  it('serves the auth screens to guests', async () => {
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/login')
+    expect(router.currentRoute.value.path).toBe('/login')
+
+    await router.push('/register')
+    expect(router.currentRoute.value.path).toBe('/register')
+  })
+
+  it('redirects unknown paths to / (then to /login for guests)', async () => {
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/totally-unknown')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+  })
+})
