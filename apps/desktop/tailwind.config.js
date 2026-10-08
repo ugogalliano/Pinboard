@@ -1,4 +1,5 @@
 import preset from '@ugogalliano/pm-design-system-vue/tailwind-preset'
+import { NOTE_COLORS_TAILWIND } from './src/shared/constants/note-colors'
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -12,7 +13,18 @@ export default {
     './node_modules/@ugogalliano/pm-design-system-vue/dist/**/*.{js,cjs,mjs}',
   ],
   theme: {
-    extend: {},
+    extend: {
+      // Fixed brand surfaces from design_pinboard.pen — intentionally NOT
+      // themeable (unlike the preset's semantic CSS-variable colors), so no
+      // new CSS vars are introduced for them.
+      colors: {
+        sidebar: '#f6f3ed',
+        canvas: '#f1eeea',
+        // Derived from NOTE_COLORS in src/shared/constants/note-colors.ts —
+        // single source of truth; keys here generate `bg-note-*` utilities.
+        note: NOTE_COLORS_TAILWIND,
+      },
+    },
   },
   plugins: [],
 }
