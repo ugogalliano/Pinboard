@@ -1,17 +1,3 @@
-<script setup lang="ts">
-import { storeToRefs } from 'pinia'
-import { Button } from '@ugogalliano/pm-design-system-vue'
-
-import { useUIStore } from '@/stores/uiStore'
-
-// App chrome only: shared/ must never import features, so the nav content
-// arrives through the default slot (BoardLayout passes <BoardList
-// variant="nav" />). Collapsed, the sidebar keeps a narrow rail with the
-// toggle still reachable.
-const ui = useUIStore()
-const { sidebarOpen } = storeToRefs(ui)
-</script>
-
 <template>
   <aside
     class="flex h-full shrink-0 flex-col gap-3 border-r border-border bg-sidebar p-3 transition-[width]"
@@ -38,3 +24,17 @@ const { sidebarOpen } = storeToRefs(ui)
     </div>
   </aside>
 </template>
+
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { Button } from '@ugogalliano/pm-design-system-vue'
+
+import { useUIStore } from '@/stores/uiStore'
+
+// App chrome only: shared/ must never import features, so the nav content
+// arrives through the default slot (BoardLayout passes <BoardList
+// variant="nav" />). Collapsed, the sidebar keeps a narrow rail with the
+// toggle still reachable.
+const ui = useUIStore()
+const { sidebarOpen } = storeToRefs(ui)
+</script>

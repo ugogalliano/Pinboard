@@ -48,7 +48,7 @@ import { Button, Dialog, Input } from '@ugogalliano/pm-design-system-vue'
 
 import { boardNameSchema } from '@/shared/validation/schemas'
 import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
-import { useCreateBoard } from '../composables/useBoards'
+import { useCreateBoard } from '../../composables/useBoards'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'update:open', value: boolean): void }>()

@@ -18,7 +18,7 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 
-import Header from '@/shared/components/layout/Header.vue'
-import Sidebar from '@/shared/components/layout/Sidebar.vue'
+import Header from '@/shared/components/layout/Header/Header.vue'
+import Sidebar from '@/shared/components/layout/Sidebar/Sidebar.vue'
 import { BoardList } from '@/features/boards'
 </script>

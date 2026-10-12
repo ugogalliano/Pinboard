@@ -2,6 +2,8 @@ import { keepPreviousData, useQuery } from '@tanstack/vue-query'
 import { computed, toValue, type MaybeRef } from 'vue'
 
 import { apiClient } from '@/shared/services/api'
+import { HTTP_METHODS } from '@/shared/constants/constants'
+import { API_URLS } from '@/shared/constants/urls'
 import type { BoardDto } from '@/shared/types/api'
 import { boardsKeys } from './useBoards'
 
@@ -28,7 +30,8 @@ export function useBoard(boardId: MaybeRef<string | string[] | undefined>) {
 
   return useQuery({
     queryKey: computed(() => boardsKeys.detail(id.value ?? '')),
-    queryFn: () => apiClient<BoardDto>('GET', `/api/boards/${id.value ?? ''}`),
+    queryFn: () =>
+      apiClient<BoardDto>(HTTP_METHODS.GET, API_URLS.boards.detail(id.value ?? '')),
     enabled: () => id.value !== undefined,
     placeholderData: keepPreviousData,
   })

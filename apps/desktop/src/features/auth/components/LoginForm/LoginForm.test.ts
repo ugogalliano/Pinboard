@@ -1,30 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { http, HttpResponse } from 'msw'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
 
 import LoginForm from './LoginForm.vue'
 import { getRefreshToken } from '@/shared/services/token'
-import type { LoginResponse } from '@/shared/types/api'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-function jsonResponse(status: number, body: unknown): Response {
-  const text = JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => JSON.parse(text) as unknown,
-  } as unknown as Response
-}
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../../../../test/msw/server'
+import { callsTo, requestLog } from '../../../../../test/msw/requests'
+import type { LoginResponse, MeResponse } from '@/shared/types/api'
 
 const TOKENS: LoginResponse = {
   accessToken: 'access-1',
   refreshToken: 'refresh-1',
   expiresAt: '2026-01-01T00:00:00Z',
 }
+
+const USER: MeResponse = { id: 'u1', email: 'a@b.co', displayName: 'Ada' }
 
 async function makeStubRouter(): Promise<Router> {
   const router = createRouter({
@@ -52,10 +46,6 @@ describe('LoginForm', () => {
     useToast().clear()
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   function mountForm() {
     return mount(LoginForm, { global: { plugins: [pinia, router] } })
   }
@@ -68,8 +58,6 @@ describe('LoginForm', () => {
   }
 
   it('shows an inline error and does not call the API when the email is invalid', async () => {
-    const fetchMock = vi.fn<FetchImpl>(async () => jsonResponse(200, TOKENS))
-    vi.stubGlobal('fetch', fetchMock)
     const wrapper = mountForm()
 
     await wrapper.find('#email').setValue('not-an-email')
@@ -77,24 +65,16 @@ describe('LoginForm', () => {
     await wrapper.find('form').trigger('submit')
     await settle()
 
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(requestLog).toHaveLength(0)
     const emailError = wrapper.find('#email-error')
     expect(emailError.exists()).toBe(true)
     expect(emailError.text()).toContain('valid email')
   })
 
   it('logs in through the store and navigates to the redirect target on success', async () => {
-    const urls: string[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (url) => {
-        urls.push(String(url))
-        if (url === '/api/auth/login') return jsonResponse(200, TOKENS)
-        if (url === '/api/auth/me') {
-          return jsonResponse(200, { id: 'u1', email: 'a@b.co', displayName: 'Ada' })
-        }
-        return jsonResponse(500, { status: 500 })
-      }),
+    server.use(
+      http.post(API_URLS.auth.login, () => HttpResponse.json(TOKENS)),
+      http.get(API_URLS.auth.me, () => HttpResponse.json(USER)),
     )
 
     // Land on /login with a redirect target so the round-trip is exercised.
@@ -106,17 +86,19 @@ describe('LoginForm', () => {
     await wrapper.find('form').trigger('submit')
     await settle()
 
-    expect(urls).toEqual(['/api/auth/login', '/api/auth/me'])
+    expect(requestLog.map((entry) => entry.url)).toEqual([API_URLS.auth.login, API_URLS.auth.me])
     expect(getRefreshToken()).toBe('refresh-1')
     expect(router.currentRoute.value.path).toBe('/')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 
   it('renders the form-level "Invalid email or password" on 401 without a toast', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () =>
-        jsonResponse(401, { status: 401, title: 'Unauthorized', detail: 'invalid credentials' }),
+    server.use(
+      http.post(API_URLS.auth.login, () =>
+        HttpResponse.json(
+          { status: 401, title: 'Unauthorized', detail: 'invalid credentials' },
+          { status: 401 },
+        ),
       ),
     )
     const wrapper = mountForm()
@@ -131,15 +113,15 @@ describe('LoginForm', () => {
     expect(alert.text()).toBe('Invalid email or password')
     // A failed login is never a toast (PLAN.FE.md §5), and no refresh was run.
     expect(useToast().toasts.value).toHaveLength(0)
+    expect(callsTo(API_URLS.auth.refresh)).toHaveLength(0)
   })
 
   it('surfaces unexpected errors as an error toast', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (url) => {
-        if (url === '/api/auth/login') return jsonResponse(200, TOKENS)
-        return jsonResponse(500, { status: 500, title: 'Boom' })
-      }),
+    server.use(
+      http.post(API_URLS.auth.login, () => HttpResponse.json(TOKENS)),
+      http.get(API_URLS.auth.me, () =>
+        HttpResponse.json({ status: 500, title: 'Boom' }, { status: 500 }),
+      ),
     )
     const wrapper = mountForm()
 
@@ -155,12 +137,11 @@ describe('LoginForm', () => {
   it('shows the mapped toast — NOT "Invalid email or password" — when the profile load fails after login', async () => {
     // Tokens issued fine; GET /me 500s → store throws ProfileLoadError.
     // REVIEW fix 1: forms must not mislabel this as bad credentials.
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (url) => {
-        if (url === '/api/auth/login') return jsonResponse(200, TOKENS)
-        return jsonResponse(500, { status: 500, title: 'Profile unavailable' })
-      }),
+    server.use(
+      http.post(API_URLS.auth.login, () => HttpResponse.json(TOKENS)),
+      http.get(API_URLS.auth.me, () =>
+        HttpResponse.json({ status: 500, title: 'Profile unavailable' }, { status: 500 }),
+      ),
     )
     const wrapper = mountForm()
 
@@ -179,15 +160,9 @@ describe('LoginForm', () => {
     ['absolute URL', 'https://evil.example'],
     ['protocol-relative URL', '//evil.example'],
   ])('ignores an unsafe redirect (%s) and lands on the app root', async (_label, evil) => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (url) => {
-        if (url === '/api/auth/login') return jsonResponse(200, TOKENS)
-        if (url === '/api/auth/me') {
-          return jsonResponse(200, { id: 'u1', email: 'a@b.co', displayName: 'Ada' })
-        }
-        return jsonResponse(500, { status: 500 })
-      }),
+    server.use(
+      http.post(API_URLS.auth.login, () => HttpResponse.json(TOKENS)),
+      http.get(API_URLS.auth.me, () => HttpResponse.json(USER)),
     )
 
     await router.push({ path: '/login', query: { redirect: evil } })

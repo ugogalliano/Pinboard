@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createMemoryHistory } from 'vue-router'
 
-import App from '@/app/App.vue'
+import App from '@/app/App/App.vue'
 import { createAppRouter } from '@/app/router'
 import { useAuthStore } from '@/stores/authStore'
 import { clearTokens } from '@/shared/services/token'
@@ -20,10 +20,6 @@ describe('app skeleton', () => {
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
   })
 
   // Phase 4: "/" now renders BoardLayout (Sidebar + Header + routed board

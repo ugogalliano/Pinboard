@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
 
 import { apiClient, mapApiErrorToMessage } from '@/shared/services/api'
+import { HTTP_METHODS } from '@/shared/constants/constants'
+import { API_URLS } from '@/shared/constants/urls'
 import { useAuthStore } from '@/stores/authStore'
 import type { BoardDto, CreateBoardRequest, UpdateBoardRequest } from '@/shared/types/api'
 
@@ -31,7 +33,7 @@ export type UpdateBoardValues = UpdateBoardRequest & { id: string }
 export function useBoards() {
   return useQuery({
     queryKey: boardsKeys.all,
-    queryFn: () => apiClient<BoardDto[]>('GET', '/api/boards'),
+    queryFn: () => apiClient<BoardDto[]>(HTTP_METHODS.GET, API_URLS.boards.list),
   })
 }
 
@@ -46,7 +48,7 @@ export function useCreateBoard() {
 
   return useMutation({
     mutationFn: (values: CreateBoardValues) =>
-      apiClient<BoardDto>('POST', '/api/boards', values),
+      apiClient<BoardDto>(HTTP_METHODS.POST, API_URLS.boards.list, values),
     onError: (err) => {
       toast({ variant: 'error', message: mapApiErrorToMessage(err) })
     },
@@ -70,7 +72,7 @@ export function useUpdateBoard() {
 
   return useMutation({
     mutationFn: ({ id, name }: UpdateBoardValues) =>
-      apiClient<BoardDto>('PUT', `/api/boards/${id}`, { name }),
+      apiClient<BoardDto>(HTTP_METHODS.PUT, API_URLS.boards.detail(id), { name }),
     onSuccess: (board) => {
       if (!board) return
       queryClient.setQueryData(boardsKeys.detail(board.id), board)
@@ -101,7 +103,7 @@ export function useDeleteBoard() {
   const { toast } = useToast()
 
   return useMutation({
-    mutationFn: (id: string) => apiClient<void>('DELETE', `/api/boards/${id}`),
+    mutationFn: (id: string) => apiClient<void>(HTTP_METHODS.DELETE, API_URLS.boards.detail(id)),
     onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey: boardsKeys.all })
       const previous = queryClient.getQueryData<BoardDto[]>(boardsKeys.all)

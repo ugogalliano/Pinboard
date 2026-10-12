@@ -4,7 +4,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 
-import App from '@/app/App.vue'
+import App from '@/app/App/App.vue'
 import router from '@/app/router'
 import { queryClient } from '@/app/queryClient'
 

@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, useQuery, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h } from 'vue'
@@ -14,26 +15,10 @@ import {
   useUpdateBoard,
 } from './useBoards'
 import { useAuthStore } from '@/stores/authStore'
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../../../test/msw/server'
+import { requestLog } from '../../../../test/msw/requests'
 import type { BoardDto } from '@/shared/types/api'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-// The jsonResponse helper is duplicated per test file on purpose: a shared
-// src/test-utils module would ship in the production bundle (convention
-// follows LoginForm.test.ts / api.test.ts).
-function jsonResponse(status: number, body: unknown): Response {
-  const text = body === undefined ? '' : JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => (text === '' ? undefined : JSON.parse(text)),
-  } as unknown as Response
-}
-
-function emptyResponse(): Response {
-  return { ok: true, status: 204, text: async () => '' } as unknown as Response
-}
 
 function board(id: string, name: string = id): BoardDto {
   return {
@@ -121,25 +106,23 @@ describe('useBoards', () => {
     useToast().clear()
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('lists boards with GET /api/boards and never retries an API error', async () => {
-    const fetchMock = vi.fn<FetchImpl>(async () => jsonResponse(500, { status: 500 }))
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json({ status: 500 }, { status: 500 })),
+    )
 
     mountMutations(pinia, queryClient)
     await settle()
 
-    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual(['/api/boards'])
+    expect(requestLog.map((entry) => entry.url)).toEqual([API_URLS.boards.list])
     expect(queryClient.getQueryState(boardsKeys.all)?.isInvalidated).toBe(true)
   })
 
   it('seeds the list cache from the response', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse(200, [board('b1', 'Alpha'), board('b2', 'Beta')])),
+    server.use(
+      http.get(API_URLS.boards.list, () =>
+        HttpResponse.json([board('b1', 'Alpha'), board('b2', 'Beta')]),
+      ),
     )
 
     mountMutations(pinia, queryClient)
@@ -150,11 +133,10 @@ describe('useBoards', () => {
 
   it('dedupes concurrent observers of the list into a single GET /api/boards', async () => {
     let getCalls = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => {
+    server.use(
+      http.get(API_URLS.boards.list, () => {
         getCalls += 1
-        return jsonResponse(200, [board('b1')])
+        return HttpResponse.json([board('b1')])
       }),
     )
 
@@ -171,16 +153,14 @@ describe('useBoards', () => {
   it('creates a board with POST /api/boards and refetches the list through an exact invalidation', async () => {
     let getCalls = 0
     let postBody: unknown
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (_url, init) => {
-        const method = init?.method ?? 'GET'
-        if (method === 'POST') {
-          postBody = JSON.parse(String(init?.body))
-          return jsonResponse(200, board('b9', 'New board'))
-        }
+    server.use(
+      http.get(API_URLS.boards.list, () => {
         getCalls += 1
-        return jsonResponse(200, getCalls === 1 ? [board('b1')] : [board('b1'), board('b9')])
+        return HttpResponse.json(getCalls === 1 ? [board('b1')] : [board('b1'), board('b9')])
+      }),
+      http.post(API_URLS.boards.list, async ({ request }) => {
+        postBody = await request.json()
+        return HttpResponse.json(board('b9', 'New board'))
       }),
     )
 
@@ -205,14 +185,11 @@ describe('useBoards', () => {
   })
 
   it('surfaces a failed create as a toast and leaves the list untouched', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (_url, init) => {
-        if ((init?.method ?? 'GET') === 'POST') {
-          return jsonResponse(403, { status: 403, detail: 'nope' })
-        }
-        return jsonResponse(200, [board('b1')])
-      }),
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board('b1')])),
+      http.post(API_URLS.boards.list, () =>
+        HttpResponse.json({ status: 403, detail: 'nope' }, { status: 403 }),
+      ),
     )
 
     const { create } = mountMutations(pinia, queryClient)
@@ -233,15 +210,12 @@ describe('useBoards', () => {
   it('writes the updated board into BOTH the detail and the list cache', async () => {
     // A tiny stateful fake so the onSettled refetch reflects the server.
     const stored = [board('b1')]
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (_url, init) => {
-        if ((init?.method ?? 'GET') === 'PUT') {
-          const updated = { ...stored[0]!, name: 'Renamed' }
-          stored[0] = updated
-          return jsonResponse(200, updated)
-        }
-        return jsonResponse(200, stored)
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json(stored)),
+      http.put(API_URLS.boards.detail('b1'), async ({ request }) => {
+        const body = (await request.json()) as { name: string }
+        stored[0] = { ...stored[0]!, name: body.name }
+        return HttpResponse.json(stored[0]!)
       }),
     )
 
@@ -261,14 +235,11 @@ describe('useBoards', () => {
 
   it('removes the board optimistically and rolls back with a toast when the delete fails', async () => {
     let deleteCalls = 0
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (_url, init) => {
-        if ((init?.method ?? 'GET') === 'DELETE') {
-          deleteCalls += 1
-          return jsonResponse(403, { status: 403, detail: 'owner only' })
-        }
-        return jsonResponse(200, [board('b1'), board('b2')])
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board('b1'), board('b2')])),
+      http.delete(API_URLS.boards.detail('b2'), () => {
+        deleteCalls += 1
+        return HttpResponse.json({ status: 403, detail: 'owner only' }, { status: 403 })
       }),
     )
 
@@ -291,16 +262,12 @@ describe('useBoards', () => {
 
   it('drops the detail cache entry after a successful delete', async () => {
     const stored = [board('b1'), board('b2')]
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (url, init) => {
-        if ((init?.method ?? 'GET') === 'DELETE') {
-          const id = String(url).replace('/api/boards/', '')
-          const index = stored.findIndex((item) => item.id === id)
-          if (index >= 0) stored.splice(index, 1)
-          return emptyResponse()
-        }
-        return jsonResponse(200, stored)
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json(stored)),
+      http.delete('/api/boards/:id', ({ params }) => {
+        const index = stored.findIndex((item) => item.id === params.id)
+        if (index >= 0) stored.splice(index, 1)
+        return new HttpResponse(null, { status: 204 })
       }),
     )
 
@@ -317,19 +284,17 @@ describe('useBoards', () => {
 
   it('leaves sibling keys (the future notes/members caches) untouched by list mutations', async () => {
     let notesFetches = 0
-    // Both the transport and the sibling observer go through this counter.
+    // The sibling observer owns its own queryFn; it never goes through fetch.
     const notesRoute = async (): Promise<Response> => {
       notesFetches += 1
-      return jsonResponse(200, [])
+      return HttpResponse.json([])
     }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (url) => {
-        if (url.startsWith('/api/boards/b1/notes')) return notesRoute()
-        if (url === '/api/boards/b1') return jsonResponse(200, board('b1'))
-        if (url === '/api/boards') return jsonResponse(200, [board('b1'), board('b2')])
-        return jsonResponse(200, board('b1'))
-      }),
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board('b1'), board('b2')])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board('b1'))),
+      http.post(API_URLS.boards.list, () => HttpResponse.json(board('b1'))),
+      http.put(API_URLS.boards.detail('b1'), () => HttpResponse.json(board('b1'))),
+      http.delete(API_URLS.boards.detail('b2'), () => new HttpResponse(null, { status: 204 })),
     )
 
     const { create, update, remove } = mountMutations(pinia, queryClient)
@@ -351,14 +316,11 @@ describe('useBoards', () => {
   })
 
   it('removes the board from the list while the DELETE is still in flight', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (_url, init) => {
-        // A delete that never answers: the cache write must be observable
-        // before the server replies, otherwise nothing is "optimistic".
-        if ((init?.method ?? 'GET') === 'DELETE') return new Promise<Response>(() => {})
-        return jsonResponse(200, [board('b1'), board('b2')])
-      }),
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board('b1'), board('b2')])),
+      // A delete that never answers: the cache write must be observable
+      // before the server replies, otherwise nothing is "optimistic".
+      http.delete(API_URLS.boards.detail('b2'), () => new Promise<Response>(() => {})),
     )
 
     const { remove } = mountMutations(pinia, queryClient)
@@ -378,17 +340,16 @@ describe('useBoards', () => {
 
   it('restores the snapshot on failure before the onSettled refetch can mask it', async () => {
     let hangList = false
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (_url, init) => {
-        if ((init?.method ?? 'GET') === 'DELETE') {
-          return jsonResponse(403, { status: 403, detail: 'owner only' })
-        }
+    server.use(
+      http.get(API_URLS.boards.list, () => {
         // From here on the list refetch never resolves, so the ONLY thing
         // that can repopulate ['boards'] is the rollback snapshot.
         if (hangList) return new Promise<Response>(() => {})
-        return jsonResponse(200, [board('b1'), board('b2')])
+        return HttpResponse.json([board('b1'), board('b2')])
       }),
+      http.delete(API_URLS.boards.detail('b2'), () =>
+        HttpResponse.json({ status: 403, detail: 'owner only' }, { status: 403 }),
+      ),
     )
 
     const { remove } = mountMutations(pinia, queryClient)
@@ -410,14 +371,11 @@ describe('useBoards', () => {
 
   it('surfaces a failed rename as a toast and leaves both caches untouched', async () => {
     const stored = [board('b1', 'Alpha')]
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (_url, init) => {
-        if ((init?.method ?? 'GET') === 'PUT') {
-          return jsonResponse(403, { status: 403, detail: 'owner only' })
-        }
-        return jsonResponse(200, stored)
-      }),
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json(stored)),
+      http.put(API_URLS.boards.detail('b1'), () =>
+        HttpResponse.json({ status: 403, detail: 'owner only' }, { status: 403 }),
+      ),
     )
 
     const { update } = mountMutations(pinia, queryClient)

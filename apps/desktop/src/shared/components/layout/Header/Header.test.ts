@@ -1,23 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { http, HttpResponse } from 'msw'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 
 import Header from './Header.vue'
 import { useAuthStore } from '@/stores/authStore'
 import { getRefreshToken } from '@/shared/services/token'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-function jsonResponse(status: number, body: unknown): Response {
-  const text = body === undefined ? '' : JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => (text === '' ? undefined : JSON.parse(text)),
-  } as unknown as Response
-}
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../../../../test/msw/server'
+import { requestLog } from '../../../../../test/msw/requests'
 
 async function settle(): Promise<void> {
   await flushPromises()
@@ -41,10 +33,6 @@ describe('Header', () => {
     await router.isReady()
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('renders the brand and the signed-in user', () => {
     useAuthStore().setUser({ id: 'u1', email: 'a@b.co', displayName: 'Ada' })
 
@@ -55,14 +43,7 @@ describe('Header', () => {
   })
 
   it('logs out through the store and lands on /login', async () => {
-    const urls: string[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async (url) => {
-        urls.push(String(url))
-        return jsonResponse(204, undefined)
-      }),
-    )
+    server.use(http.post(API_URLS.auth.logout, () => new HttpResponse(null, { status: 204 })))
     useAuthStore().setTokens({
       accessToken: 'access-1',
       refreshToken: 'refresh-1',
@@ -74,7 +55,8 @@ describe('Header', () => {
     await wrapper.find('[data-testid="logout"]').trigger('click')
     await settle()
 
-    expect(urls).toEqual(['/api/auth/logout'])
+    expect(requestLog.map((entry) => entry.url)).toEqual([API_URLS.auth.logout])
+    expect(requestLog[0]!.method).toBe('POST')
     expect(getRefreshToken()).toBeNull()
     expect(router.currentRoute.value.path).toBe('/login')
   })

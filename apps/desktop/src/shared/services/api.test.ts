@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
 
 import {
   ApiError,
@@ -15,151 +16,102 @@ import {
   setAccessToken,
   setRefreshToken,
 } from './token'
+import { API_URLS } from '../constants/urls'
+import { server } from '../../../test/msw/server'
+import { callsTo } from '../../../test/msw/requests'
 import type { BoardDto, ProblemDetails } from '../types/api'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-// ── Response factories ───────────────────────────────────────────────────
-// The client reads `res.text()` for normal responses and `res.json()` for the
-// refresh call, so mocks expose both.
-
-function jsonResponse(status: number, body: unknown): Response {
-  const text = JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => JSON.parse(text) as unknown,
-  } as unknown as Response
-}
-
-function textResponse(status: number, body: string): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => body,
-    json: async () => {
-      throw new SyntaxError('not JSON')
-    },
-  } as unknown as Response
-}
-
-function emptyResponse(status: number): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => '',
-    json: async () => {
-      throw new SyntaxError('empty')
-    },
-  } as unknown as Response
-}
-
-interface FetchCall {
-  url: string
-  method?: string
-  headers: Record<string, string>
-  body?: string
-}
-
-function recordCall(url: string, init?: RequestInit): FetchCall {
-  return {
-    url,
-    method: init?.method,
-    headers: (init?.headers as Record<string, string>) ?? {},
-    body: init?.body as string | undefined,
-  }
-}
 
 const BOARDS: BoardDto[] = [
   { id: 'b1', name: 'Launch', createdBy: 'u1', createdAt: '', updatedAt: '' },
 ]
 
-describe('apiClient', () => {
-  let calls: FetchCall[]
+/** The baseline "stale token" response reused across the refresh tests. */
+function unauthorized(): Response {
+  return HttpResponse.json({ status: 401, title: 'Unauthorized' }, { status: 401 })
+}
 
+describe('apiClient', () => {
   beforeEach(() => {
     localStorage.clear()
     clearTokens()
-    calls = []
   })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  function track(url: string, init?: RequestInit): FetchCall {
-    const call = recordCall(url, init)
-    calls.push(call)
-    return call
-  }
-
-  function callsTo(url: string): FetchCall[] {
-    return calls.filter((c) => c.url === url)
-  }
 
   it('GET success parses typed JSON', async () => {
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      track(url, init)
-      return jsonResponse(200, BOARDS)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    let captured: { method: string; body: string; contentType: string | null } | undefined
+    server.use(
+      http.get(API_URLS.boards.list, async ({ request }) => {
+        captured = {
+          method: request.method,
+          body: await request.text(),
+          contentType: request.headers.get('Content-Type'),
+        }
+        return HttpResponse.json(BOARDS)
+      }),
+    )
 
-    const result = await apiClient<BoardDto[]>('GET', '/api/boards')
+    const result = await apiClient<BoardDto[]>('GET', API_URLS.boards.list)
 
     expect(result).toEqual(BOARDS)
-    expect(calls).toHaveLength(1)
-    expect(calls[0]!.method).toBe('GET')
-    expect(calls[0]!.body).toBeUndefined()
-    expect(calls[0]!.headers['Content-Type']).toBe('application/json')
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(1)
+    expect(captured!.method).toBe('GET')
+    expect(captured!.body).toBe('')
+    expect(captured!.contentType).toBe('application/json')
   })
 
   it('204 returns undefined before any JSON parsing', async () => {
-    const res = emptyResponse(204)
-    const jsonSpy = vi.spyOn(res, 'json')
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => res),
+    server.use(
+      http.delete(API_URLS.boards.detail('b1'), () => new HttpResponse(null, { status: 204 })),
     )
 
-    await expect(apiClient<void>('DELETE', '/api/boards/b1')).resolves.toBeUndefined()
-    expect(jsonSpy).not.toHaveBeenCalled()
+    // A 204 has no body to parse: the client resolves undefined and never
+    // attempts JSON (the real Response carries no payload).
+    await expect(apiClient<void>('DELETE', API_URLS.boards.detail('b1'))).resolves.toBeUndefined()
   })
 
   it('200 with an empty body returns undefined', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => emptyResponse(200)),
+    server.use(
+      http.get(API_URLS.boards.detail('b1'), () => new HttpResponse(null, { status: 200 })),
     )
 
-    await expect(apiClient('GET', '/api/boards/b1')).resolves.toBeUndefined()
+    await expect(apiClient('GET', API_URLS.boards.detail('b1'))).resolves.toBeUndefined()
   })
 
   it('only serializes a body when one is provided', async () => {
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      track(url, init)
-      return jsonResponse(201, BOARDS[0])
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    let getBody: string | undefined
+    let postBody: string | undefined
+    server.use(
+      http.get(API_URLS.boards.list, async ({ request }) => {
+        getBody = await request.text()
+        return HttpResponse.json([])
+      }),
+      http.post(API_URLS.boards.list, async ({ request }) => {
+        postBody = await request.text()
+        return HttpResponse.json(BOARDS[0], { status: 201 })
+      }),
+    )
 
-    await apiClient('POST', '/api/boards', { name: 'Launch' })
+    await apiClient('GET', API_URLS.boards.list)
+    await apiClient('POST', API_URLS.boards.list, { name: 'Launch' })
 
-    expect(calls[0]!.body).toBe(JSON.stringify({ name: 'Launch' }))
+    expect(getBody).toBe('')
+    expect(postBody).toBe(JSON.stringify({ name: 'Launch' }))
   })
 
   it('attaches Authorization when an access token exists and omits it otherwise', async () => {
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      track(url, init)
-      return jsonResponse(200, [])
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    const authorizations: Array<string | null> = []
+    server.use(
+      http.get(API_URLS.boards.list, ({ request }) => {
+        authorizations.push(request.headers.get('Authorization'))
+        return HttpResponse.json([])
+      }),
+    )
 
-    await apiClient('GET', '/api/boards')
-    expect(calls[0]!.headers.Authorization).toBeUndefined()
+    await apiClient('GET', API_URLS.boards.list)
+    expect(authorizations[0]).toBeNull()
 
     setAccessToken('tok-123')
-    await apiClient('GET', '/api/boards')
-    expect(calls[1]!.headers.Authorization).toBe('Bearer tok-123')
+    await apiClient('GET', API_URLS.boards.list)
+    expect(authorizations[1]).toBe('Bearer tok-123')
   })
 
   it('400 with ProblemDetails throws ApiError carrying the problem and the mapped message', async () => {
@@ -170,12 +122,11 @@ describe('apiClient', () => {
       detail: 'Board name is required.',
       errors: { name: ['Name is required'] },
     }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse(400, problem)),
-    )
+    server.use(http.post(API_URLS.boards.list, () => HttpResponse.json(problem, { status: 400 })))
 
-    const error = await apiClient('POST', '/api/boards', { name: '' }).catch((e: unknown) => e)
+    const error = await apiClient('POST', API_URLS.boards.list, { name: '' }).catch(
+      (e: unknown) => e,
+    )
 
     expect(isApiError(error)).toBe(true)
     const apiError = error as ApiError
@@ -188,12 +139,14 @@ describe('apiClient', () => {
   it('502 with an HTML body synthesizes a safe ProblemDetails and leaks no raw HTML', async () => {
     const html =
       '<html><head><title>502 Bad Gateway</title></head><body>nginx internal secret</body></html>'
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => textResponse(502, html)),
+    server.use(
+      http.get(
+        API_URLS.boards.list,
+        () => new HttpResponse(html, { status: 502, headers: { 'Content-Type': 'text/html' } }),
+      ),
     )
 
-    const error = await apiClient('GET', '/api/boards').catch((e: unknown) => e)
+    const error = await apiClient('GET', API_URLS.boards.list).catch((e: unknown) => e)
 
     expect(isApiError(error)).toBe(true)
     const apiError = error as ApiError
@@ -210,35 +163,41 @@ describe('apiClient', () => {
     setAccessToken('stale')
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        return jsonResponse(200, {
+    let refresh: { authorization: string | null; body: string } | undefined
+    const authorizations: Array<string | null> = []
+    let boardsCalls = 0
+
+    server.use(
+      http.post(API_URLS.auth.refresh, async ({ request }) => {
+        refresh = {
+          authorization: request.headers.get('Authorization'),
+          body: await request.text(),
+        }
+        return HttpResponse.json({
           accessToken: 'fresh',
           refreshToken: 'r2',
           expiresAt: '2026-01-01T00:00:00Z',
         })
-      }
-      if (callsTo('/api/boards').length === 1) {
-        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-      }
-      return jsonResponse(200, BOARDS)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+      }),
+      http.get(API_URLS.boards.list, ({ request }) => {
+        boardsCalls += 1
+        authorizations.push(request.headers.get('Authorization'))
+        if (boardsCalls === 1) return unauthorized()
+        return HttpResponse.json(BOARDS)
+      }),
+    )
 
-    const result = await apiClient<BoardDto[]>('GET', '/api/boards')
+    const result = await apiClient<BoardDto[]>('GET', API_URLS.boards.list)
 
     expect(result).toEqual(BOARDS)
-    expect(callsTo('/api/boards')).toHaveLength(2)
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(2)
 
     // Refresh goes out WITHOUT the stale Authorization header and with the stored refresh token.
-    const refreshCall = calls.find((c) => c.url === '/api/auth/refresh')!
-    expect(refreshCall.headers.Authorization).toBeUndefined()
-    expect(refreshCall.body).toBe(JSON.stringify({ refreshToken: 'r1' }))
+    expect(refresh!.authorization).toBeNull()
+    expect(refresh!.body).toBe(JSON.stringify({ refreshToken: 'r1' }))
 
     // The retry carries the rotated access token; tokens are updated everywhere.
-    const retryCall = callsTo('/api/boards').at(-1)!
-    expect(retryCall.headers.Authorization).toBe('Bearer fresh')
+    expect(authorizations[1]).toBe('Bearer fresh')
     expect(getAccessToken()).toBe('fresh')
     expect(getRefreshToken()).toBe('r2')
   })
@@ -249,50 +208,58 @@ describe('apiClient', () => {
 
     let refreshCalls = 0
     const firstAttempts = new Set<string>()
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
+    server.use(
+      http.post(API_URLS.auth.refresh, () => {
         refreshCalls += 1
-        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
-      }
-      if (!firstAttempts.has(call.url)) {
-        firstAttempts.add(call.url)
-        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-      }
-      return jsonResponse(200, BOARDS)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+        return HttpResponse.json({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
+      }),
+      http.get(API_URLS.boards.list, () => {
+        if (!firstAttempts.has('list')) {
+          firstAttempts.add('list')
+          return unauthorized()
+        }
+        return HttpResponse.json(BOARDS)
+      }),
+      http.get(API_URLS.boards.detail('b1'), () => {
+        if (!firstAttempts.has('b1')) {
+          firstAttempts.add('b1')
+          return unauthorized()
+        }
+        return HttpResponse.json(BOARDS)
+      }),
+    )
 
     const [a, b] = await Promise.all([
-      apiClient<BoardDto[]>('GET', '/api/boards'),
-      apiClient<BoardDto[]>('GET', '/api/boards/b1'),
+      apiClient<BoardDto[]>('GET', API_URLS.boards.list),
+      apiClient<BoardDto[]>('GET', API_URLS.boards.detail('b1')),
     ])
 
     expect(a).toEqual(BOARDS)
     expect(b).toEqual(BOARDS)
     expect(refreshCalls).toBe(1)
-    expect(callsTo('/api/boards')).toHaveLength(2)
-    expect(callsTo('/api/boards/b1')).toHaveLength(2)
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(2)
+    expect(callsTo(API_URLS.boards.detail('b1'))).toHaveLength(2)
   })
 
   it('refresh failure clears tokens, throws the original 401 and never retries', async () => {
     setAccessToken('stale')
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-      }
-      return jsonResponse(401, { status: 401, title: 'Unauthorized', detail: 'bad token' })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.post(API_URLS.auth.refresh, () => unauthorized()),
+      http.get(API_URLS.boards.list, () =>
+        HttpResponse.json(
+          { status: 401, title: 'Unauthorized', detail: 'bad token' },
+          { status: 401 },
+        ),
+      ),
+    )
 
-    const error = await apiClient('GET', '/api/boards').catch((e: unknown) => e)
+    const error = await apiClient('GET', API_URLS.boards.list).catch((e: unknown) => e)
 
     expect(isApiError(error)).toBe(true)
     expect((error as ApiError).status).toBe(401)
-    expect(callsTo('/api/boards')).toHaveLength(1) // original NOT retried
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(1) // original NOT retried
     expect(getAccessToken()).toBeNull()
     expect(localStorage.getItem('postit.refreshToken')).toBeNull()
   })
@@ -301,64 +268,69 @@ describe('apiClient', () => {
     setAccessToken('stale')
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
-      }
-      return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
+        HttpResponse.json({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' }),
+      ),
+      http.get(API_URLS.boards.list, () => unauthorized()),
+    )
 
-    await expect(apiClient('GET', '/api/boards')).rejects.toThrow(ApiError)
-    expect(callsTo('/api/boards')).toHaveLength(2)
+    await expect(apiClient('GET', API_URLS.boards.list)).rejects.toThrow(ApiError)
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(2)
   })
 
   it('refresh returning 200 with an HTML/malformed body clears tokens and throws the terminal 401', async () => {
     setAccessToken('stale')
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        // "successful" status but an HTML gateway page — res.json() must throw.
-        return textResponse(200, '<html><body>proxy login page</body></html>')
-      }
-      return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.post(
+        API_URLS.auth.refresh,
+        () =>
+          // "successful" status but an HTML gateway page — res.json() must throw.
+          new HttpResponse('<html><body>proxy login page</body></html>', {
+            status: 200,
+            headers: { 'Content-Type': 'text/html' },
+          }),
+      ),
+      http.get(API_URLS.boards.list, () => unauthorized()),
+    )
 
-    const error = await apiClient('GET', '/api/boards').catch((e: unknown) => e)
+    const error = await apiClient('GET', API_URLS.boards.list).catch((e: unknown) => e)
 
     expect(isApiError(error)).toBe(true)
     expect((error as ApiError).status).toBe(401)
     expect(getAccessToken()).toBeNull()
     expect(localStorage.getItem('postit.refreshToken')).toBeNull()
     // Refresh never succeeded, so the original request is NOT retried.
-    expect(callsTo('/api/boards')).toHaveLength(1)
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(1)
   })
+
   it('401 on /api/auth/login surfaces directly — NO refresh attempt', async () => {
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
         // Would "succeed" if attempted — the point is it must never be called.
-        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
-      }
-      return jsonResponse(401, { status: 401, title: 'Unauthorized', detail: 'bad credentials' })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+        HttpResponse.json({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' }),
+      ),
+      http.post(API_URLS.auth.login, () =>
+        HttpResponse.json(
+          { status: 401, title: 'Unauthorized', detail: 'bad credentials' },
+          { status: 401 },
+        ),
+      ),
+    )
 
-    const error = await apiClient('POST', '/api/auth/login', {
+    const error = await apiClient('POST', API_URLS.auth.login, {
       email: 'a@b.co',
       password: 'wrong',
     }).catch((e: unknown) => e)
 
     expect(isApiError(error)).toBe(true)
     expect((error as ApiError).status).toBe(401)
-    expect(callsTo('/api/auth/login')).toHaveLength(1)
-    expect(callsTo('/api/auth/refresh')).toHaveLength(0)
+    expect(callsTo(API_URLS.auth.login)).toHaveLength(1)
+    expect(callsTo(API_URLS.auth.refresh)).toHaveLength(0)
     // Tokens are untouched — a failed login must not clear the stored session.
     expect(getRefreshToken()).toBe('r1')
   })
@@ -366,78 +338,75 @@ describe('apiClient', () => {
   it('401 on /api/auth/register also skips the refresh cycle', async () => {
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
-      }
-      return jsonResponse(401, { status: 401 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
+        HttpResponse.json({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' }),
+      ),
+      http.post(API_URLS.auth.register, () => HttpResponse.json({ status: 401 }, { status: 401 })),
+    )
 
-    await expect(apiClient('POST', '/api/auth/register', { email: 'a@b.co' })).rejects.toThrow(
+    await expect(apiClient('POST', API_URLS.auth.register, { email: 'a@b.co' })).rejects.toThrow(
       ApiError,
     )
-    expect(callsTo('/api/auth/refresh')).toHaveLength(0)
+    expect(callsTo(API_URLS.auth.refresh)).toHaveLength(0)
   })
 
   it('GET /api/auth/me keeps the refresh+retry cycle (stale access token mid-session)', async () => {
     setAccessToken('stale')
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
-      }
-      if (callsTo('/api/auth/me').length === 1) {
-        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-      }
-      return jsonResponse(200, { id: 'u1', email: 'a@b.co', displayName: 'Ada' })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    let meCalls = 0
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
+        HttpResponse.json({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' }),
+      ),
+      http.get(API_URLS.auth.me, () => {
+        meCalls += 1
+        if (meCalls === 1) return unauthorized()
+        return HttpResponse.json({ id: 'u1', email: 'a@b.co', displayName: 'Ada' })
+      }),
+    )
 
-    const me = await apiClient<{ id: string }>('GET', '/api/auth/me')
+    const me = await apiClient<{ id: string }>('GET', API_URLS.auth.me)
 
     expect(me).toEqual({ id: 'u1', email: 'a@b.co', displayName: 'Ada' })
-    expect(callsTo('/api/auth/refresh')).toHaveLength(1)
-    expect(callsTo('/api/auth/me')).toHaveLength(2)
+    expect(callsTo(API_URLS.auth.refresh)).toHaveLength(1)
+    expect(callsTo(API_URLS.auth.me)).toHaveLength(2)
   })
 
   it('GET /api/auth/me?with-query keeps the refresh cycle (match ignores query string)', async () => {
     setAccessToken('stale')
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
-      }
-      if (callsTo('/api/auth/me?fields=full').length === 1) {
-        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-      }
-      return jsonResponse(200, { id: 'u1' })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    let meCalls = 0
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
+        HttpResponse.json({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' }),
+      ),
+      http.get(API_URLS.auth.me, () => {
+        meCalls += 1
+        if (meCalls === 1) return unauthorized()
+        return HttpResponse.json({ id: 'u1' })
+      }),
+    )
 
     await expect(apiClient('GET', '/api/auth/me?fields=full')).resolves.toEqual({ id: 'u1' })
-    expect(callsTo('/api/auth/refresh')).toHaveLength(1)
+    expect(callsTo(API_URLS.auth.refresh)).toHaveLength(1)
+    expect(callsTo('/api/auth/me?fields=full')).toHaveLength(2)
   })
 
   it('POST /api/auth/me (non-GET) skips the refresh cycle — exemption is GET-only', async () => {
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      track(url, init)
-      if (url === '/api/auth/refresh') {
-        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
-      }
-      return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
+        HttpResponse.json({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' }),
+      ),
+      http.post(API_URLS.auth.me, () => unauthorized()),
+    )
 
-    await expect(apiClient('POST', '/api/auth/me')).rejects.toThrow(ApiError)
-    expect(callsTo('/api/auth/refresh')).toHaveLength(0)
+    await expect(apiClient('POST', API_URLS.auth.me)).rejects.toThrow(ApiError)
+    expect(callsTo(API_URLS.auth.refresh)).toHaveLength(0)
   })
 
   it('a terminal refresh failure notifies the session bus (full logout hook)', async () => {
@@ -447,16 +416,12 @@ describe('apiClient', () => {
     const handler = vi.fn<() => void>()
     onSessionTerminated(handler)
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-      }
-      return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.post(API_URLS.auth.refresh, () => unauthorized()),
+      http.get(API_URLS.boards.list, () => unauthorized()),
+    )
 
-    await expect(apiClient('GET', '/api/boards')).rejects.toThrow(ApiError)
+    await expect(apiClient('GET', API_URLS.boards.list)).rejects.toThrow(ApiError)
     expect(handler).toHaveBeenCalledTimes(1)
     clearSessionTerminatedHandlers()
   })
@@ -465,20 +430,20 @@ describe('apiClient', () => {
     setAccessToken('stale')
     setRefreshToken('r1')
 
-    const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-      const call = track(url, init)
-      if (call.url === '/api/auth/refresh') {
-        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' })
-      }
-      if (callsTo('/api/boards').length === 1) {
-        return jsonResponse(401, { status: 401, title: 'Unauthorized' })
-      }
-      return jsonResponse(200, BOARDS)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    let boardsCalls = 0
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
+        HttpResponse.json({ accessToken: 'fresh', refreshToken: 'r2', expiresAt: '' }),
+      ),
+      http.get(API_URLS.boards.list, () => {
+        boardsCalls += 1
+        if (boardsCalls === 1) return unauthorized()
+        return HttpResponse.json(BOARDS)
+      }),
+    )
 
-    await expect(apiClient<BoardDto[]>('GET', '/api/boards')).resolves.toEqual(BOARDS)
-    expect(callsTo('/api/auth/refresh')).toHaveLength(1)
+    await expect(apiClient<BoardDto[]>('GET', API_URLS.boards.list)).resolves.toEqual(BOARDS)
+    expect(callsTo(API_URLS.auth.refresh)).toHaveLength(1)
   })
 })
 

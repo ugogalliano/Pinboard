@@ -50,10 +50,10 @@
 import { computed, ref } from 'vue'
 import { Button } from '@ugogalliano/pm-design-system-vue'
 
-import Spinner from '@/shared/components/ui/Spinner.vue'
-import BoardCard from './BoardCard.vue'
-import CreateBoardDialog from './CreateBoardDialog.vue'
-import { useBoards } from '../composables/useBoards'
+import Spinner from '@/shared/components/ui/Spinner/Spinner.vue'
+import BoardCard from '../BoardCard/BoardCard.vue'
+import CreateBoardDialog from '../CreateBoardDialog/CreateBoardDialog.vue'
+import { useBoards } from '../../composables/useBoards'
 
 // `nav` = sidebar rail; `cards` = home grid.
 type BoardListVariant = 'cards' | 'nav'

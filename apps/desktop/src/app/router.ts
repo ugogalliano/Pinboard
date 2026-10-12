@@ -6,8 +6,8 @@ import {
   type RouterHistory,
 } from 'vue-router'
 
-import AuthLayout from '@/app/layouts/AuthLayout.vue'
-import BoardLayout from '@/app/layouts/BoardLayout.vue'
+import AuthLayout from '@/app/layouts/AuthLayout/AuthLayout.vue'
+import BoardLayout from '@/app/layouts/BoardLayout/BoardLayout.vue'
 import { LoginForm, RegisterForm } from '@/features/auth'
 import { BoardCanvasPlaceholder, BoardList, BoardView } from '@/features/boards'
 import { useAuthStore } from '@/stores/authStore'

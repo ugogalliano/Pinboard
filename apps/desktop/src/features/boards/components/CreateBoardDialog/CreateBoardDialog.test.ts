@@ -1,27 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 
 import CreateBoardDialog from './CreateBoardDialog.vue'
-import BoardList from './BoardList.vue'
+import BoardList from '../BoardList/BoardList.vue'
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../../../../test/msw/server'
+import { callsTo, requestLog } from '../../../../../test/msw/requests'
 import type { BoardDto } from '@/shared/types/api'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-// The jsonResponse helper is duplicated per test file on purpose: a shared
-// src/test-utils module would ship in the production bundle.
-function jsonResponse(status: number, body: unknown): Response {
-  const text = body === undefined ? '' : JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => (text === '' ? undefined : JSON.parse(text)),
-  } as unknown as Response
-}
 
 async function settle(): Promise<void> {
   await flushPromises()
@@ -72,7 +62,6 @@ describe('CreateBoardDialog', () => {
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 
@@ -89,15 +78,13 @@ describe('CreateBoardDialog', () => {
   })
 
   it('rejects a name over 200 characters inline without calling the API', async () => {
-    const fetchMock = vi.fn<FetchImpl>(async () => jsonResponse(200, {}))
-    vi.stubGlobal('fetch', fetchMock)
-
     mountDialog()
     await flushPromises()
 
     await fillAndSubmit('x'.repeat(201))
 
-    expect(fetchMock).not.toHaveBeenCalled()
+    // Client-side rejection: nothing reached the network.
+    expect(requestLog).toHaveLength(0)
     const error = document.querySelector('#create-board-name-error')
     expect(error).not.toBeNull()
     expect(error!.textContent).toContain('at most 200 characters')
@@ -114,21 +101,20 @@ describe('CreateBoardDialog', () => {
     const stored: BoardDto[] = []
     let postBody: unknown
 
-    const fetchMock = vi.fn<FetchImpl>(async (_url, init) => {
-      if ((init?.method ?? 'GET') === 'POST') {
-        postBody = JSON.parse(String(init?.body))
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json(stored)),
+      http.post(API_URLS.boards.list, async ({ request }) => {
+        postBody = await request.json()
         stored.push(created)
-        return jsonResponse(200, created)
-      }
-      return jsonResponse(200, stored)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+        return HttpResponse.json(created)
+      }),
+    )
 
     const wrapper = mount(BoardList, {
       global: { plugins: [await stubRouter(), [VueQueryPlugin, { queryClient }]] },
     })
     await settle()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(1)
 
     await wrapper.find('[data-testid="create-board"]').trigger('click')
     await flushPromises()
@@ -136,18 +122,17 @@ describe('CreateBoardDialog', () => {
 
     expect(postBody).toEqual({ name: 'Roadmap' })
     // Invalidation refetched the list, which now serves the new board.
-    const listGets = fetchMock.mock.calls.filter(
-      ([url, init]) => String(url) === '/api/boards' && (init?.method ?? 'GET') === 'GET',
-    )
+    const listGets = callsTo(API_URLS.boards.list).filter((entry) => entry.method === 'GET')
     expect(listGets).toHaveLength(2)
     expect(nameInput()).toBeNull()
     expect(wrapper.findAll('[data-testid="board-card"]')).toHaveLength(1)
   })
 
   it('renders a server 400 detail as a form-level message', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse(400, { status: 400, detail: 'Name is taken' })),
+    server.use(
+      http.post(API_URLS.boards.list, () =>
+        HttpResponse.json({ status: 400, detail: 'Name is taken' }, { status: 400 }),
+      ),
     )
 
     mountDialog()
@@ -164,9 +149,10 @@ describe('CreateBoardDialog', () => {
   })
 
   it('surfaces unexpected failures as an error toast and keeps the dialog open', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse(500, { status: 500, title: 'Boom' })),
+    server.use(
+      http.post(API_URLS.boards.list, () =>
+        HttpResponse.json({ status: 500, title: 'Boom' }, { status: 500 }),
+      ),
     )
 
     mountDialog()

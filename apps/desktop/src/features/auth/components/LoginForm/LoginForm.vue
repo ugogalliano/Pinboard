@@ -1,12 +1,10 @@
 <template>
-  <!-- Card content only (AuthLayout owns page + card chrome). Mirrors the
-       "02 Register" frame; form keeps the card's gap-5 rhythm. -->
+  <!-- Card content only (AuthLayout owns page + card chrome). The form
+       mirrors the card's gap-5 rhythm per the "01 Login" frame spec. -->
   <form class="flex flex-col gap-5" novalidate @submit="onSubmit">
     <div class="flex flex-col gap-1.5">
-      <h2 class="text-xl font-bold text-foreground">Create your account</h2>
-      <p class="text-[13px] text-muted-foreground">
-        Start organizing ideas with your team in seconds.
-      </p>
+      <h2 class="text-xl font-bold text-foreground">Welcome back</h2>
+      <p class="text-[13px] text-muted-foreground">Sign in to continue to your boards.</p>
     </div>
 
     <p
@@ -18,12 +16,6 @@
     </p>
 
     <div class="flex flex-col gap-[14px]">
-      <Input
-        name="displayName"
-        label="Display name"
-        placeholder="How should we call you?"
-        required
-      />
       <Input
         name="email"
         label="Email address"
@@ -40,11 +32,13 @@
       />
     </div>
 
-    <Button type="submit" class="w-full" :loading="isSubmitting">Create account</Button>
+    <Button type="submit" class="w-full" :loading="isSubmitting">Sign in</Button>
 
     <p class="flex items-center justify-center gap-1 text-[13px] text-muted-foreground">
-      Already have an account?
-      <RouterLink to="/login" class="text-[13px] font-semibold text-foreground">Sign in</RouterLink>
+      Don't have an account?
+      <RouterLink to="/register" class="text-[13px] font-semibold text-foreground"
+        >Create one</RouterLink
+      >
     </p>
   </form>
 </template>
@@ -53,25 +47,27 @@
 import { ref } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Button, Input } from '@ugogalliano/pm-design-system-vue'
 
-import { registerSchema } from '@/shared/validation/schemas'
-import { useAuth } from '../composables/useAuth'
+import { loginSchema } from '@/shared/validation/schemas'
+import { resolveRedirect, useAuth } from '../../composables/useAuth'
 
 const router = useRouter()
-const { submitRegister } = useAuth()
+const route = useRoute()
+const { submitLogin } = useAuth()
 
 const { handleSubmit, setErrors, setFieldError, isSubmitting } = useForm({
-  validationSchema: toTypedSchema(registerSchema),
+  validationSchema: toTypedSchema(loginSchema),
 })
 
-// Same form-level channel as LoginForm (policy lives in useAuth).
+// Form-level credential error — rendered, never toasted (policy lives in
+// the useAuth composable; this component only renders and delegates).
 const formError = ref<string | null>(null)
 
 const onSubmit = handleSubmit(async (values) => {
   formError.value = null
-  const ok = await submitRegister(values, {
+  const ok = await submitLogin(values, {
     setErrors,
     setFieldError,
     setFormMessage: (message) => {
@@ -79,7 +75,7 @@ const onSubmit = handleSubmit(async (values) => {
     },
   })
   if (ok) {
-    await router.push('/')
+    await router.push(resolveRedirect(route.query.redirect))
   }
 })
 </script>

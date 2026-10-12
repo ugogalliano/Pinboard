@@ -1,107 +1,3 @@
-<script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee-validate/zod'
-import { useRoute, useRouter } from 'vue-router'
-import { Button, Dialog, Input, useToast } from '@ugogalliano/pm-design-system-vue'
-
-import { boardNameSchema } from '@/shared/validation/schemas'
-import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
-import Spinner from '@/shared/components/ui/Spinner.vue'
-import { canManageBoard, useDeleteBoard, useUpdateBoard } from '../composables/useBoards'
-import { useBoard } from '../composables/useBoard'
-
-const route = useRoute()
-const router = useRouter()
-const { toast } = useToast()
-
-// The `:boardId` route param is normalized once, inside the composable.
-const {
-  data: board,
-  isPending,
-  isError,
-  isFetching,
-  refetch,
-} = useBoard(computed(() => route.params.boardId))
-
-const canManage = computed(() => (board.value ? canManageBoard(board.value) : false))
-
-// ── Rename (Owner only) ─────────────────────────────────────────────────
-const {
-  handleSubmit,
-  isSubmitting: isRenaming,
-  setFieldValue,
-  resetForm,
-} = useForm({
-  validationSchema: toTypedSchema(boardNameSchema),
-})
-
-const renaming = ref(false)
-
-// Form-level channel for a server 400 (board endpoints answer with `detail`
-// only — never an `errors` dictionary — so there is no setErrors branch).
-const renameError = ref<string | null>(null)
-
-// Seed the inline field from the loaded board (skip validation: we are
-// populating, not re-validating).
-watch(
-  board,
-  (value) => {
-    if (value) setFieldValue('name', value.name, false)
-  },
-  { immediate: true },
-)
-
-// Every (re)opening starts from the board's SAVED name: text abandoned by a
-// Cancel — or by a failed save — must not leak into the next attempt.
-watch(renaming, (open) => {
-  if (!open) return
-  renameError.value = null
-  resetForm({ values: { name: board.value?.name ?? '' } })
-})
-
-const { mutateAsync: updateBoard } = useUpdateBoard()
-
-// Bound once here so the template can hand the handler to @click / @submit.
-// handleSubmit re-throws whatever the callback throws, so a failed PUT has to
-// be caught HERE: an escaping rejection is an unhandledrejection that
-// app.config.errorHandler never sees.
-const submitRename = handleSubmit(async (values) => {
-  if (!board.value) return
-  renameError.value = null
-  try {
-    await updateBoard({ id: board.value.id, name: values.name })
-    renaming.value = false
-  } catch (err) {
-    if (isApiError(err) && err.status === 400) {
-      renameError.value = mapApiErrorToMessage(err)
-      return
-    }
-    // Anything else already produced an error toast in useUpdateBoard's
-    // onError — toasting again here would double it.
-  }
-})
-
-function retry(): void {
-  void refetch()
-}
-
-// ── Delete (Owner only) ─────────────────────────────────────────────────
-const deleteOpen = ref(false)
-const { mutateAsync: deleteBoard, isPending: isDeleting } = useDeleteBoard()
-
-async function confirmDelete(): Promise<void> {
-  if (!board.value) return
-  try {
-    await deleteBoard(board.value.id)
-    toast({ variant: 'success', message: 'Board deleted' })
-    await router.push('/')
-  } catch {
-    // Rollback + toast live in the composable; the user stays on the board.
-  }
-}
-</script>
-
 <template>
   <header class="flex flex-col gap-3 border-b border-border pb-4" data-testid="board-header">
     <!-- Initial load only, and never over a board we can still show:
@@ -214,3 +110,107 @@ async function confirmDelete(): Promise<void> {
     </template>
   </header>
 </template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import { useRoute, useRouter } from 'vue-router'
+import { Button, Dialog, Input, useToast } from '@ugogalliano/pm-design-system-vue'
+
+import { boardNameSchema } from '@/shared/validation/schemas'
+import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
+import Spinner from '@/shared/components/ui/Spinner/Spinner.vue'
+import { canManageBoard, useDeleteBoard, useUpdateBoard } from '../../composables/useBoards'
+import { useBoard } from '../../composables/useBoard'
+
+const route = useRoute()
+const router = useRouter()
+const { toast } = useToast()
+
+// The `:boardId` route param is normalized once, inside the composable.
+const {
+  data: board,
+  isPending,
+  isError,
+  isFetching,
+  refetch,
+} = useBoard(computed(() => route.params.boardId))
+
+const canManage = computed(() => (board.value ? canManageBoard(board.value) : false))
+
+// ── Rename (Owner only) ─────────────────────────────────────────────────
+const {
+  handleSubmit,
+  isSubmitting: isRenaming,
+  setFieldValue,
+  resetForm,
+} = useForm({
+  validationSchema: toTypedSchema(boardNameSchema),
+})
+
+const renaming = ref(false)
+
+// Form-level channel for a server 400 (board endpoints answer with `detail`
+// only — never an `errors` dictionary — so there is no setErrors branch).
+const renameError = ref<string | null>(null)
+
+// Seed the inline field from the loaded board (skip validation: we are
+// populating, not re-validating).
+watch(
+  board,
+  (value) => {
+    if (value) setFieldValue('name', value.name, false)
+  },
+  { immediate: true },
+)
+
+// Every (re)opening starts from the board's SAVED name: text abandoned by a
+// Cancel — or by a failed save — must not leak into the next attempt.
+watch(renaming, (open) => {
+  if (!open) return
+  renameError.value = null
+  resetForm({ values: { name: board.value?.name ?? '' } })
+})
+
+const { mutateAsync: updateBoard } = useUpdateBoard()
+
+// Bound once here so the template can hand the handler to @click / @submit.
+// handleSubmit re-throws whatever the callback throws, so a failed PUT has to
+// be caught HERE: an escaping rejection is an unhandledrejection that
+// app.config.errorHandler never sees.
+const submitRename = handleSubmit(async (values) => {
+  if (!board.value) return
+  renameError.value = null
+  try {
+    await updateBoard({ id: board.value.id, name: values.name })
+    renaming.value = false
+  } catch (err) {
+    if (isApiError(err) && err.status === 400) {
+      renameError.value = mapApiErrorToMessage(err)
+      return
+    }
+    // Anything else already produced an error toast in useUpdateBoard's
+    // onError — toasting again here would double it.
+  }
+})
+
+function retry(): void {
+  void refetch()
+}
+
+// ── Delete (Owner only) ─────────────────────────────────────────────────
+const deleteOpen = ref(false)
+const { mutateAsync: deleteBoard, isPending: isDeleting } = useDeleteBoard()
+
+async function confirmDelete(): Promise<void> {
+  if (!board.value) return
+  try {
+    await deleteBoard(board.value.id)
+    toast({ variant: 'success', message: 'Board deleted' })
+    await router.push('/')
+  } catch {
+    // Rollback + toast live in the composable; the user stays on the board.
+  }
+}
+</script>

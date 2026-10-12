@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { http, HttpResponse } from 'msw'
 import { boardsKeys } from '@/features/boards'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
@@ -8,27 +9,12 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
 
 import BoardHeader from './BoardHeader.vue'
-import { useBoards } from '../composables/useBoards'
+import { useBoards } from '../../composables/useBoards'
 import { useAuthStore } from '@/stores/authStore'
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../../../../test/msw/server'
+import { requestLog } from '../../../../../test/msw/requests'
 import type { BoardDto } from '@/shared/types/api'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-// The jsonResponse helper is duplicated per test file on purpose: a shared
-// src/test-utils module would ship in the production bundle.
-function jsonResponse(status: number, body: unknown): Response {
-  const text = body === undefined ? '' : JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => (text === '' ? undefined : JSON.parse(text)),
-  } as unknown as Response
-}
-
-function emptyResponse(): Response {
-  return { ok: true, status: 204, text: async () => '' } as unknown as Response
-}
 
 function board(overrides: Partial<BoardDto> = {}): BoardDto {
   return {
@@ -82,7 +68,6 @@ describe('BoardHeader', () => {
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 
@@ -111,12 +96,11 @@ describe('BoardHeader', () => {
     return { wrapper }
   }
 
-  function stubBoards(handler: FetchImpl): void {
-    vi.stubGlobal('fetch', handler)
-  }
-
   it('hides the rename and delete affordances for a non-owner', async () => {
-    stubBoards(async () => jsonResponse(200, board({ createdBy: 'u2' })))
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board({ createdBy: 'u2' })])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board({ createdBy: 'u2' }))),
+    )
 
     const { wrapper } = mountHeader()
     await settle()
@@ -129,17 +113,16 @@ describe('BoardHeader', () => {
   it('rejects an over-limit name inline (Zod) without issuing the PUT', async () => {
     const stored = [board()]
     let putBody: unknown
-    stubBoards(async (url, init) => {
-      const method = init?.method ?? 'GET'
-      if (method === 'PUT') {
-        putBody = JSON.parse(String(init?.body))
-        const updated = { ...stored[0]!, name: String(putBody) === '' ? '' : 'Renamed board' }
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json(stored)),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(stored[0]!)),
+      http.put(API_URLS.boards.detail('b1'), async ({ request }) => {
+        putBody = await request.json()
+        const updated = { ...stored[0]!, name: 'Renamed board' }
         stored[0] = updated
-        return jsonResponse(200, updated)
-      }
-      if (url === '/api/boards/b1') return jsonResponse(200, stored[0]!)
-      return jsonResponse(200, stored)
-    })
+        return HttpResponse.json(updated)
+      }),
+    )
 
     const { wrapper } = mountHeader()
     await settle()
@@ -153,23 +136,23 @@ describe('BoardHeader', () => {
     await settle()
 
     expect(putBody).toBeUndefined()
+    expect(requestLog.some((entry) => entry.method === 'PUT')).toBe(false)
     expect(wrapper.find('#rename-board-name-error').text()).toContain('at most 200 characters')
   })
 
   it('renames on a valid name and writes the new name into detail and list caches', async () => {
     const stored = [board()]
     let putBody: unknown
-    stubBoards(async (url, init) => {
-      const method = init?.method ?? 'GET'
-      if (method === 'PUT') {
-        putBody = JSON.parse(String(init?.body))
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json(stored)),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(stored[0]!)),
+      http.put(API_URLS.boards.detail('b1'), async ({ request }) => {
+        putBody = await request.json()
         const updated = { ...stored[0]!, name: 'Renamed board' }
         stored[0] = updated
-        return jsonResponse(200, updated)
-      }
-      if (url === '/api/boards/b1') return jsonResponse(200, stored[0]!)
-      return jsonResponse(200, stored)
-    })
+        return HttpResponse.json(updated)
+      }),
+    )
 
     const { wrapper } = mountHeader()
     await settle()
@@ -197,14 +180,14 @@ describe('BoardHeader', () => {
       unhandled.push(event.reason)
     }
     window.addEventListener('unhandledrejection', onUnhandled)
-    stubBoards(async (url, init) => {
-      if ((init?.method ?? 'GET') === 'PUT') {
-        putBody = JSON.parse(String(init?.body))
-        return jsonResponse(403, { status: 403, detail: 'owner only' })
-      }
-      if (url === '/api/boards/b1') return jsonResponse(200, board())
-      return jsonResponse(200, [board()])
-    })
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board()])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board())),
+      http.put(API_URLS.boards.detail('b1'), async ({ request }) => {
+        putBody = await request.json()
+        return HttpResponse.json({ status: 403, detail: 'owner only' }, { status: 403 })
+      }),
+    )
 
     const { wrapper } = mountHeader()
     await settle()
@@ -237,13 +220,13 @@ describe('BoardHeader', () => {
   })
 
   it('re-seeds the rename field with the saved name when a cancelled attempt is reopened', async () => {
-    stubBoards(async (url, init) => {
-      if ((init?.method ?? 'GET') === 'PUT') {
-        return jsonResponse(200, { ...board(), name: 'Renamed board' })
-      }
-      if (url === '/api/boards/b1') return jsonResponse(200, board())
-      return jsonResponse(200, [board()])
-    })
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board()])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board())),
+      http.put(API_URLS.boards.detail('b1'), () =>
+        HttpResponse.json({ ...board(), name: 'Renamed board' }),
+      ),
+    )
 
     const { wrapper } = mountHeader()
     await settle()
@@ -259,19 +242,17 @@ describe('BoardHeader', () => {
     // Reopening must show the board's SAVED name, never the abandoned text.
     await wrapper.find('[data-testid="rename-board"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find<HTMLInputElement>('#rename-board-name').element.value).toBe('Product launch')
+    expect(wrapper.find<HTMLInputElement>('#rename-board-name').element.value).toBe(
+      'Product launch',
+    )
   })
 
   it('names the board in the delete confirmation and sends nothing on cancel', async () => {
-    let deleteCalls = 0
-    stubBoards(async (url, init) => {
-      if ((init?.method ?? 'GET') === 'DELETE') {
-        deleteCalls += 1
-        return emptyResponse()
-      }
-      if (url === '/api/boards/b1') return jsonResponse(200, board())
-      return jsonResponse(200, [board()])
-    })
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board()])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board())),
+      http.delete(API_URLS.boards.detail('b1'), () => new HttpResponse(null, { status: 204 })),
+    )
 
     const { wrapper } = mountHeader()
     await settle()
@@ -287,31 +268,28 @@ describe('BoardHeader', () => {
     // Cancelling leaves without issuing a request.
     await click('[data-testid="cancel-delete-board"]')
 
-    expect(deleteCalls).toBe(0)
+    expect(requestLog.some((entry) => entry.method === 'DELETE')).toBe(false)
     expect(router.currentRoute.value.path).toBe('/boards/b1')
     expect(document.querySelector('[data-testid="confirm-delete-board"]')).toBeNull()
   })
 
   it('deletes on confirm: navigates home, drops the detail cache and refetches the list', async () => {
     const stored = [board(), board({ id: 'b2', name: 'Second' })]
-    let deleteCalls = 0
     let listGets = 0
-    stubBoards(async (url, init) => {
-      const method = init?.method ?? 'GET'
-      if (method === 'DELETE') {
-        deleteCalls += 1
-        const id = String(url).replace('/api/boards/', '')
-        const index = stored.findIndex((item) => item.id === id)
-        if (index >= 0) stored.splice(index, 1)
-        return emptyResponse()
-      }
-      if (url === '/api/boards') {
+    server.use(
+      http.get(API_URLS.boards.list, () => {
         listGets += 1
-        return jsonResponse(200, stored)
-      }
-      const id = String(url).replace('/api/boards/', '')
-      return jsonResponse(200, stored.find((item) => item.id === id) ?? board())
-    })
+        return HttpResponse.json(stored)
+      }),
+      http.get('/api/boards/:id', ({ params }) =>
+        HttpResponse.json(stored.find((item) => item.id === params.id) ?? board()),
+      ),
+      http.delete('/api/boards/:id', ({ params }) => {
+        const index = stored.findIndex((item) => item.id === params.id)
+        if (index >= 0) stored.splice(index, 1)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
 
     const { wrapper } = mountHeader()
     await settle()
@@ -322,7 +300,7 @@ describe('BoardHeader', () => {
     await flushPromises()
     await click('[data-testid="confirm-delete-board"]')
 
-    expect(deleteCalls).toBe(1)
+    expect(requestLog.filter((entry) => entry.method === 'DELETE')).toHaveLength(1)
     expect(router.currentRoute.value.path).toBe('/')
     expect(queryClient.getQueryData(boardsKeys.detail('b1'))).toBeUndefined()
     expect(listGets).toBe(listGetsBefore + 1)
@@ -330,13 +308,13 @@ describe('BoardHeader', () => {
   })
 
   it('keeps the user on the board and toasts when the delete is rejected', async () => {
-    stubBoards(async (url, init) => {
-      if ((init?.method ?? 'GET') === 'DELETE') {
-        return jsonResponse(403, { status: 403, detail: 'owner only' })
-      }
-      if (url === '/api/boards/b1') return jsonResponse(200, board())
-      return jsonResponse(200, [board()])
-    })
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board()])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board())),
+      http.delete(API_URLS.boards.detail('b1'), () =>
+        HttpResponse.json({ status: 403, detail: 'owner only' }, { status: 403 }),
+      ),
+    )
 
     const { wrapper } = mountHeader()
     await settle()

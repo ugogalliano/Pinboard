@@ -1,36 +1,23 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, type Router } from 'vue-router'
 
-import App from '@/app/App.vue'
+import App from '@/app/App/App.vue'
 import { createAppRouter } from '@/app/router'
 import { boardsKeys } from '@/features/boards'
 import { useAuthStore } from '@/stores/authStore'
 import { clearTokens } from '@/shared/services/token'
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../../test/msw/server'
 import type { BoardDto, LoginResponse } from '@/shared/types/api'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
 
 const TOKENS: LoginResponse = {
   accessToken: 'access-1',
   refreshToken: 'refresh-1',
   expiresAt: '2026-01-01T00:00:00Z',
-}
-
-function jsonResponse(status: number, body: unknown): Response {
-  const text = body === undefined ? '' : JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => (text === '' ? undefined : JSON.parse(text)),
-  } as unknown as Response
-}
-
-function emptyResponse(): Response {
-  return { ok: true, status: 204, text: async () => '' } as unknown as Response
 }
 
 function makeBoard(id: string, name: string): BoardDto {
@@ -52,39 +39,30 @@ async function settle(): Promise<void> {
 function stubApi(seed: BoardDto[] = []): void {
   const stored = [...seed]
 
-  vi.stubGlobal(
-    'fetch',
-    vi.fn<FetchImpl>(async (url, init) => {
-      const method = init?.method ?? 'GET'
-      const path = String(url)
-
-      if (path === '/api/boards' && method === 'GET') return jsonResponse(200, stored)
-      if (path === '/api/boards' && method === 'POST') {
-        const created = makeBoard(`b${stored.length + 1}`, JSON.parse(String(init?.body)).name)
-        stored.push(created)
-        return jsonResponse(200, created)
-      }
-
-      const id = path.replace('/api/boards/', '')
-      if (method === 'PUT') {
-        const name = JSON.parse(String(init?.body)).name
-        const index = stored.findIndex((board) => board.id === id)
-        if (index >= 0) stored[index] = { ...stored[index]!, name }
-        return jsonResponse(
-          200,
-          stored.find((board) => board.id === id)!,
-        )
-      }
-      if (method === 'DELETE') {
-        const index = stored.findIndex((board) => board.id === id)
-        if (index >= 0) stored.splice(index, 1)
-        return emptyResponse()
-      }
-
-      const board = stored.find((item) => item.id === id)
+  server.use(
+    http.get(API_URLS.boards.list, () => HttpResponse.json(stored)),
+    http.post(API_URLS.boards.list, async ({ request }) => {
+      const body = (await request.json()) as { name: string }
+      const created = makeBoard(`b${stored.length + 1}`, body.name)
+      stored.push(created)
+      return HttpResponse.json(created)
+    }),
+    http.put('/api/boards/:id', async ({ request, params }) => {
+      const body = (await request.json()) as { name: string }
+      const index = stored.findIndex((board) => board.id === params.id)
+      if (index >= 0) stored[index] = { ...stored[index]!, name: body.name }
+      return HttpResponse.json(stored.find((board) => board.id === params.id)!)
+    }),
+    http.delete('/api/boards/:id', ({ params }) => {
+      const index = stored.findIndex((board) => board.id === params.id)
+      if (index >= 0) stored.splice(index, 1)
+      return new HttpResponse(null, { status: 204 })
+    }),
+    http.get('/api/boards/:id', ({ params }) => {
+      const board = stored.find((item) => item.id === params.id)
       return board
-        ? jsonResponse(200, board)
-        : jsonResponse(404, { status: 404, detail: 'Board not found' })
+        ? HttpResponse.json(board)
+        : HttpResponse.json({ status: 404, detail: 'Board not found' }, { status: 404 })
     }),
   )
 }
@@ -105,7 +83,6 @@ describe('boards flow (integration)', () => {
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 

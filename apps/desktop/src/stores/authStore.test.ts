@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
 
@@ -12,6 +13,9 @@ import {
 import { apiClient, ApiError, isApiError, isProfileLoadError } from '@/shared/services/api'
 import { clearSessionTerminatedHandlers } from '@/shared/services/session'
 import { queryClient } from '@/app/queryClient'
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../test/msw/server'
+import { requestLog } from '../../test/msw/requests'
 import type { LoginResponse, MeResponse } from '@/shared/types/api'
 
 const TOKENS: LoginResponse = {
@@ -22,6 +26,11 @@ const TOKENS: LoginResponse = {
 
 const USER: MeResponse = { id: 'u1', email: 'a@b.co', displayName: 'Ada' }
 
+/** The baseline 401 ProblemDetails the auth endpoints answer with. */
+function unauthorized(): Response {
+  return HttpResponse.json({ status: 401, title: 'Unauthorized' }, { status: 401 })
+}
+
 describe('authStore', () => {
   beforeEach(() => {
     clearSessionTerminatedHandlers()
@@ -31,10 +40,6 @@ describe('authStore', () => {
     queryClient.clear()
     const store = useAuthStore()
     store.clearAuth()
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
   })
 
   it('is not authenticated with only a refresh token present', () => {
@@ -91,57 +96,9 @@ describe('authStore', () => {
   })
 
   // ── Network actions (Phase 3) ────────────────────────────────────────
-  // Exercised end-to-end through apiClient with a stubbed global fetch, so
-  // the real refresh-skip rules and token plumbing are covered too.
+  // Exercised end-to-end through apiClient against MSW handlers, so the real
+  // refresh-skip rules and token plumbing are covered too.
 })
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-function jsonResponse(status: number, body: unknown): Response {
-  const text = JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => JSON.parse(text) as unknown,
-  } as unknown as Response
-}
-
-interface RecordedCall {
-  url: string
-  method?: string
-  body?: string
-}
-
-/** Routes /api/auth/* to per-endpoint responses and records every call. */
-function stubAuthFetch(handlers: Partial<Record<string, () => Response>>): RecordedCall[] {
-  const calls: RecordedCall[] = []
-  const fetchMock = vi.fn<FetchImpl>(async (url, init) => {
-    calls.push({ url: String(url), method: init?.method, body: init?.body as string | undefined })
-    const handler = handlers[String(url)]
-    if (!handler) {
-      return jsonResponse(500, { status: 500, title: 'Unhandled test route' })
-    }
-    return handler()
-  })
-  vi.stubGlobal('fetch', fetchMock)
-  return calls
-}
-
-const LOGIN_OK = () =>
-  jsonResponse(200, {
-    accessToken: 'access-1',
-    refreshToken: 'refresh-1',
-    expiresAt: '2026-01-01T00:00:00Z',
-  })
-const ME_OK = () => jsonResponse(200, USER)
-const REFRESH_OK = () =>
-  jsonResponse(200, {
-    accessToken: 'access-2',
-    refreshToken: 'refresh-2',
-    expiresAt: '2026-01-01T00:00:00Z',
-  })
-const UNAUTHORIZED = () => jsonResponse(401, { status: 401, title: 'Unauthorized' })
 
 describe('authStore network actions', () => {
   beforeEach(() => {
@@ -155,13 +112,12 @@ describe('authStore network actions', () => {
     useToast().clear()
   })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('login success stores tokens (memory + localStorage) and loads the user', async () => {
     const store = useAuthStore()
-    const calls = stubAuthFetch({ '/api/auth/login': LOGIN_OK, '/api/auth/me': ME_OK })
+    server.use(
+      http.post(API_URLS.auth.login, () => HttpResponse.json(TOKENS)),
+      http.get(API_URLS.auth.me, () => HttpResponse.json(USER)),
+    )
 
     await store.login({ email: 'a@b.co', password: 'hunter2' })
 
@@ -169,15 +125,15 @@ describe('authStore network actions', () => {
     expect(store.user).toEqual(USER)
     expect(getAccessToken()).toBe('access-1')
     expect(getRefreshToken()).toBe('refresh-1')
-    expect(calls.map((c) => c.url)).toEqual(['/api/auth/login', '/api/auth/me'])
+    expect(requestLog.map((entry) => entry.url)).toEqual([API_URLS.auth.login, API_URLS.auth.me])
   })
 
   it('login with invalid credentials rejects with the 401 ApiError and clears nothing it did not set', async () => {
     const store = useAuthStore()
-    stubAuthFetch({
-      '/api/auth/login': UNAUTHORIZED,
-      '/api/auth/me': ME_OK,
-    })
+    server.use(
+      http.post(API_URLS.auth.login, () => unauthorized()),
+      http.get(API_URLS.auth.me, () => HttpResponse.json(USER)),
+    )
 
     const error = await store.login({ email: 'a@b.co', password: 'wrong' }).catch((e: unknown) => e)
 
@@ -190,43 +146,43 @@ describe('authStore network actions', () => {
 
   it('register posts the account then auto-logs in (204 body tolerated)', async () => {
     const store = useAuthStore()
-    const noContent = {
-      ok: true,
-      status: 204,
-      text: async () => '',
-      json: async () => {
-        throw new SyntaxError('empty')
-      },
-    } as unknown as Response
-    const calls = stubAuthFetch({
-      '/api/auth/register': () => noContent,
-      '/api/auth/login': LOGIN_OK,
-      '/api/auth/me': ME_OK,
-    })
+    server.use(
+      http.post(API_URLS.auth.register, () => new HttpResponse(null, { status: 204 })),
+      http.post(API_URLS.auth.login, () => HttpResponse.json(TOKENS)),
+      http.get(API_URLS.auth.me, () => HttpResponse.json(USER)),
+    )
 
     await store.register({ email: 'a@b.co', password: 'hunter2', displayName: 'Ada' })
 
     expect(store.isAuthenticated).toBe(true)
-    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
-      'POST /api/auth/register',
-      'POST /api/auth/login',
-      'GET /api/auth/me',
+    expect(requestLog.map((entry) => `${entry.method} ${entry.url}`)).toEqual([
+      `POST ${API_URLS.auth.register}`,
+      `POST ${API_URLS.auth.login}`,
+      `GET ${API_URLS.auth.me}`,
     ])
   })
 
   it('bootstrap without a stored refresh token returns false without any network call', async () => {
     const store = useAuthStore()
-    const calls = stubAuthFetch({})
 
     await expect(store.bootstrap()).resolves.toBe(false)
-    expect(calls).toHaveLength(0)
+    expect(requestLog).toHaveLength(0)
     expect(store.isLoading).toBe(false)
   })
 
   it('bootstrap with a valid refresh token rotates the session and loads the user', async () => {
     setRefreshToken('refresh-old')
     const store = useAuthStore()
-    const calls = stubAuthFetch({ '/api/auth/refresh': REFRESH_OK, '/api/auth/me': ME_OK })
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
+        HttpResponse.json({
+          accessToken: 'access-2',
+          refreshToken: 'refresh-2',
+          expiresAt: '2026-01-01T00:00:00Z',
+        }),
+      ),
+      http.get(API_URLS.auth.me, () => HttpResponse.json(USER)),
+    )
 
     await expect(store.bootstrap()).resolves.toBe(true)
 
@@ -234,14 +190,14 @@ describe('authStore network actions', () => {
     expect(store.user).toEqual(USER)
     expect(getAccessToken()).toBe('access-2')
     expect(getRefreshToken()).toBe('refresh-2')
-    expect(calls.map((c) => c.url)).toEqual(['/api/auth/refresh', '/api/auth/me'])
+    expect(requestLog.map((entry) => entry.url)).toEqual([API_URLS.auth.refresh, API_URLS.auth.me])
     expect(store.isLoading).toBe(false)
   })
 
   it('bootstrap with an expired refresh token clears the session and empties localStorage', async () => {
     setRefreshToken('refresh-old')
     const store = useAuthStore()
-    stubAuthFetch({ '/api/auth/refresh': UNAUTHORIZED })
+    server.use(http.post(API_URLS.auth.refresh, () => unauthorized()))
 
     await expect(store.bootstrap()).resolves.toBe(false)
 
@@ -259,12 +215,8 @@ describe('authStore network actions', () => {
     queryClient.setQueryData(['boards'], [{ id: 'b1' }])
     expect(queryClient.getQueryData(['boards'])).toBeDefined()
 
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => {
-        throw new Error('offline')
-      }),
-    )
+    // A network-level failure (fetch rejects), not an HTTP error status.
+    server.use(http.post(API_URLS.auth.logout, () => HttpResponse.error()))
 
     await store.logout()
 
@@ -280,17 +232,18 @@ describe('authStore network actions', () => {
     store.setTokens(TOKENS)
     store.setUser(USER)
     queryClient.setQueryData(['boards'], [{ id: 'b1' }])
-    const calls = stubAuthFetch({ '/api/auth/logout': () => jsonResponse(204, null) })
+    let logoutBody: string | undefined
+    server.use(
+      http.post(API_URLS.auth.logout, async ({ request }) => {
+        logoutBody = await request.text()
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
 
     await store.logout()
 
-    expect(calls).toEqual([
-      {
-        url: '/api/auth/logout',
-        method: 'POST',
-        body: JSON.stringify({ refreshToken: 'refresh-1' }),
-      },
-    ])
+    expect(logoutBody).toBe(JSON.stringify({ refreshToken: 'refresh-1' }))
+    expect(requestLog).toEqual([{ method: 'POST', url: API_URLS.auth.logout }])
     expect(store.isAuthenticated).toBe(false)
     expect(queryClient.getQueryData(['boards'])).toBeUndefined()
   })
@@ -299,10 +252,12 @@ describe('authStore network actions', () => {
 
   it('login half-state: tokens issued then GET /me fails → session fully cleared, ProfileLoadError thrown', async () => {
     const store = useAuthStore()
-    stubAuthFetch({
-      '/api/auth/login': LOGIN_OK,
-      '/api/auth/me': () => jsonResponse(500, { status: 500, title: 'Boom' }),
-    })
+    server.use(
+      http.post(API_URLS.auth.login, () => HttpResponse.json(TOKENS)),
+      http.get(API_URLS.auth.me, () =>
+        HttpResponse.json({ status: 500, title: 'Boom' }, { status: 500 }),
+      ),
+    )
 
     const error = await store.login({ email: 'a@b.co', password: 'hunter2' }).catch((e) => e)
 
@@ -316,10 +271,18 @@ describe('authStore network actions', () => {
   it('bootstrap half-state: refresh ok but GET /me fails → false and no leftover tokens', async () => {
     setRefreshToken('refresh-old')
     const store = useAuthStore()
-    stubAuthFetch({
-      '/api/auth/refresh': REFRESH_OK,
-      '/api/auth/me': () => jsonResponse(500, { status: 500, title: 'Boom' }),
-    })
+    server.use(
+      http.post(API_URLS.auth.refresh, () =>
+        HttpResponse.json({
+          accessToken: 'access-2',
+          refreshToken: 'refresh-2',
+          expiresAt: '2026-01-01T00:00:00Z',
+        }),
+      ),
+      http.get(API_URLS.auth.me, () =>
+        HttpResponse.json({ status: 500, title: 'Boom' }, { status: 500 }),
+      ),
+    )
 
     await expect(store.bootstrap()).resolves.toBe(false)
     expect(store.user).toBeNull()
@@ -334,12 +297,12 @@ describe('authStore network actions', () => {
     queryClient.setQueryData(['boards'], [{ id: 'b1' }])
 
     // Mid-session read 401s; the automatic refresh is terminal-failed (401).
-    stubAuthFetch({
-      '/api/boards': UNAUTHORIZED,
-      '/api/auth/refresh': UNAUTHORIZED,
-    })
+    server.use(
+      http.get(API_URLS.boards.list, () => unauthorized()),
+      http.post(API_URLS.auth.refresh, () => unauthorized()),
+    )
 
-    await expect(apiClient('GET', '/api/boards')).rejects.toThrow(ApiError)
+    await expect(apiClient('GET', API_URLS.boards.list)).rejects.toThrow(ApiError)
 
     // The session bus handler registered by the store already cleaned up —
     // no waiting for the next navigation.

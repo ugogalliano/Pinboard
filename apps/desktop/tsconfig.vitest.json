@@ -1,9 +1,11 @@
 {
   "extends": "./tsconfig.app.json",
 
-  // Override to include only test files and clear exclusions.
-  // Application code imported in tests is automatically included via module resolution.
-  "include": ["src/**/__tests__/*", "env.d.ts"],
+  // Include the test surface (colocated `src/**/*.test.ts` and cross-cutting
+  // `src/**/__tests__/*`) plus the MSW infrastructure in `test/**/*`; the app
+  // project (tsconfig.app.json) excludes tests, so they are type-checked only
+  // here. Application code imported by tests is included via module resolution.
+  "include": ["src/**/*.test.ts", "src/**/__tests__/*", "test/**/*", "env.d.ts"],
   "exclude": [],
 
   "compilerOptions": {

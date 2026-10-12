@@ -23,7 +23,7 @@ export default defineConfigWithVueTs(
 
   {
     ...pluginVitest.configs.recommended,
-    files: ['src/**/__tests__/*'],
+    files: ['src/**/__tests__/*', 'src/**/*.test.ts', 'test/**/*'],
   },
 
   {
@@ -32,9 +32,9 @@ export default defineConfigWithVueTs(
     // vue3-essential multi-word rule is relaxed for exactly those three
     // FILES — scoped by path so no other component may claim the names.
     files: [
-      'src/shared/components/layout/Header.vue',
-      'src/shared/components/layout/Sidebar.vue',
-      'src/shared/components/ui/Spinner.vue',
+      'src/shared/components/layout/Header/Header.vue',
+      'src/shared/components/layout/Sidebar/Sidebar.vue',
+      'src/shared/components/ui/Spinner/Spinner.vue',
     ],
     rules: {
       'vue/multi-word-component-names': 'off',

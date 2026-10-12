@@ -1,3 +1,19 @@
+<template>
+  <header
+    class="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4"
+    data-testid="app-header"
+  >
+    <h1 class="text-lg font-bold text-foreground">PostIt</h1>
+
+    <div class="flex items-center gap-3">
+      <span v-if="user" class="text-sm text-muted-foreground" data-testid="header-user">
+        {{ user.displayName }}
+      </span>
+      <Button variant="secondary" size="sm" data-testid="logout" @click="onLogout">Log out</Button>
+    </div>
+  </header>
+</template>
+
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
@@ -18,19 +34,3 @@ async function onLogout(): Promise<void> {
   await router.push('/login')
 }
 </script>
-
-<template>
-  <header
-    class="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4"
-    data-testid="app-header"
-  >
-    <h1 class="text-lg font-bold text-foreground">PostIt</h1>
-
-    <div class="flex items-center gap-3">
-      <span v-if="user" class="text-sm text-muted-foreground" data-testid="header-user">
-        {{ user.displayName }}
-      </span>
-      <Button variant="secondary" size="sm" data-testid="logout" @click="onLogout">Log out</Button>
-    </div>
-  </header>
-</template>

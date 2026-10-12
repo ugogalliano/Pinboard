@@ -1,9 +1,9 @@
-export { default as BoardCard } from './components/BoardCard.vue'
-export { default as BoardList } from './components/BoardList.vue'
-export { default as CreateBoardDialog } from './components/CreateBoardDialog.vue'
-export { default as BoardHeader } from './components/BoardHeader.vue'
-export { default as BoardView } from './components/BoardView.vue'
-export { default as BoardCanvasPlaceholder } from './components/BoardCanvasPlaceholder.vue'
+export { default as BoardCard } from './components/BoardCard/BoardCard.vue'
+export { default as BoardList } from './components/BoardList/BoardList.vue'
+export { default as CreateBoardDialog } from './components/CreateBoardDialog/CreateBoardDialog.vue'
+export { default as BoardHeader } from './components/BoardHeader/BoardHeader.vue'
+export { default as BoardView } from './components/BoardView/BoardView.vue'
+export { default as BoardCanvasPlaceholder } from './components/BoardCanvasPlaceholder/BoardCanvasPlaceholder.vue'
 export {
   boardsKeys,
   canManageBoard,

@@ -12,9 +12,9 @@ Vue Query data layer:
 
 ```text
 apps/desktop/src/
-├── app/           # App.vue, router.ts, layouts/ (AuthLayout, BoardLayout)
-├── features/      # auth, boards, notes, members — each with components/, composables/, index.ts
-├── shared/        # components/{ui,layout}, composables, services, validation, types
+├── app/           # App/App.vue, router.ts, layouts/ (AuthLayout/, BoardLayout/)
+├── features/      # auth, boards, notes, members — each with components/<Name>/<Name>.vue, composables/, index.ts
+├── shared/        # components/{ui,layout}/<Name>/<Name>.vue, composables, services, validation, types
 │   └── constants/ # constants.ts (generic, e.g. HTTP methods), urls.ts (all API URLs), note-colors.ts
 ├── stores/        # Pinia: authStore.ts, uiStore.ts
 ├── main.ts        # createApp + VueQueryPlugin (QueryClient)
@@ -51,11 +51,13 @@ Key mechanics:
 
 ## 2. Coding conventions and naming
 
-- **Components**: PascalCase SFC file names (`BoardList.vue`), one component per
-  file, `<script setup lang="ts">` always; `<style scoped>` only when Tailwind
-  utilities are not enough. Use PascalCase in templates for custom components.
-  Blocks in every SFC are ordered template → script setup → style (a style
-  block is added last, only when Tailwind utilities are not enough).
+- **Components**: one component per folder, both PascalCase — the file lives at
+  `<group>/<ComponentName>/<ComponentName>.vue` with its colocated test at
+  `<group>/<ComponentName>/<ComponentName>.test.ts`. `<script setup lang="ts">`
+  always; `<style scoped>` only when Tailwind utilities are not enough. Use
+  PascalCase in templates for custom components. Blocks in every SFC are ordered
+  template → script setup → style (a style block is added last, only when
+  Tailwind utilities are not enough).
 - **Composables**: camelCase `useXxx.ts` files returning an object of reactive
   state + actions. Feature composables wrap `useQuery`/`useMutation` and own the
   query keys for their feature. Keep them small; split before they grow into
@@ -190,12 +192,27 @@ Rules:
 - **Unit** (Vitest): stores (with `@pinia/testing` `createTestingPinia`),
   token management, apiClient error/refresh paths, Zod schemas, query/mutation
   logic (fresh `QueryClient` per test with `retry: false`, mocked `queryFn`).
+- **Network mocking** (MSW): all HTTP is intercepted with `msw/node`; the infra
+  lives in `test/msw/` — outside `src/`, so it is never bundled. Type-check
+  split: the APP project (`tsconfig.app.json`) excludes tests
+  (`src/**/*.test.ts`, `src/**/__tests__/*`); the VITEST project
+  (`tsconfig.vitest.json`) type-checks `src/**/*.test.ts`,
+  `src/**/__tests__/*` and `test/**/*`. Each test declares only the handlers it
+  needs via `server.use(http.get/post/…, () => HttpResponse.json(…))`; the
+  shared setup runs with `onUnhandledRequest: 'error'`, so any un-mocked request
+  fails loudly. Assert method/path/order through the request log (`requestLog` /
+  `callsTo(path, method?)` — the optional `method` narrows a path that serves
+  more than one verb); assert bodies and the `Authorization` header by capturing
+  them inside the handler closure — **never** read `request.body` /
+  `request.json()` in a life-cycle listener (MSW locks the stream there).
+  A `204` is `new HttpResponse(null, { status: 204 })`.
 - **Component** (Vitest + Vue Test Utils): form submissions through VeeValidate,
   rendering with props, error states.
 - **Integration** (Vitest + Vue Test Utils): login → board list → create board
   → navigate; install router/pinia/vue-query via `global.plugins`.
-- Convention: colocated `*.test.ts` next to the source file
-  (`NoteCanvas.vue` → `NoteCanvas.test.ts`).
+- Convention: unit/component suites are colocated (`X.test.ts` next to the
+  component/composable, e.g. `NoteCanvas.vue` → `NoteCanvas.test.ts`), while
+  cross-cutting integration suites live in `src/app/__tests__/`.
 - Not in MVP: SignalR connection (integration only), Tauri-specific APIs,
   visual styling.
 
@@ -273,7 +290,7 @@ Run only the review stages relevant to the change. All agents obey §10.
   instead of silently restructuring.
 - **Never ignore failing tests / lint / build.** A red suite is a blocker.
 - **No new dependencies without justification** (Vue, Pinia, vue-query,
-  VeeValidate, Zod are approved).
+  VeeValidate, Zod, MSW are approved).
 - **Branch rule**: work happens on the `feat/fe-<slug>` branch created and
   verified by `architect-client`; if you are not on it, stop and ask.
 - **Flag conflicts and ambiguity** (PLAN.FE.md vs code drift, contradictory

@@ -1,23 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { http, HttpResponse } from 'msw'
 import { createPinia, setActivePinia } from 'pinia'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import BoardLayout from './BoardLayout.vue'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-// The sidebar's BoardList reads GET /api/boards. A real 200 body (not a 204)
-// keeps vue-query from warning that the query resolved undefined.
-function jsonResponse(body: unknown): Response {
-  return {
-    ok: true,
-    status: 200,
-    text: async () => JSON.stringify(body),
-    json: async () => JSON.stringify(body) as unknown,
-  } as unknown as Response
-}
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../../../test/msw/server'
 
 async function stubRouter(): Promise<ReturnType<typeof createRouter>> {
   const router = createRouter({
@@ -46,14 +36,9 @@ describe('BoardLayout', () => {
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse([])),
-    )
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
+    // The sidebar's BoardList reads GET /api/boards. A real 200 body (not a
+    // 204) keeps vue-query from warning that the query resolved undefined.
+    server.use(http.get(API_URLS.boards.list, () => HttpResponse.json([])))
   })
 
   it('renders the app chrome (sidebar + header) and the routed outlet', async () => {

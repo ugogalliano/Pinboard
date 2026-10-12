@@ -1,25 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { http, HttpResponse } from 'msw'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import BoardList from './BoardList.vue'
-
-type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>
-
-// The jsonResponse helper is duplicated per test file on purpose: a shared
-// src/test-utils module would ship in the production bundle.
-function jsonResponse(status: number, body: unknown): Response {
-  const text = body === undefined ? '' : JSON.stringify(body)
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => text,
-    json: async () => (text === '' ? undefined : JSON.parse(text)),
-  } as unknown as Response
-}
+import { API_URLS } from '@/shared/constants/urls'
+import { server } from '../../../../../test/msw/server'
+import { callsTo } from '../../../../../test/msw/requests'
 
 function board(id: string, name: string) {
   return {
@@ -36,14 +26,6 @@ async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 50))
 }
 
-/** A never-resolving fetch keeps the query in its initial pending state. */
-function hangingFetch(): void {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn<FetchImpl>(() => new Promise<Response>(() => {})),
-  )
-}
-
 describe('BoardList', () => {
   let queryClient: QueryClient
 
@@ -56,7 +38,6 @@ describe('BoardList', () => {
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 
@@ -83,7 +64,8 @@ describe('BoardList', () => {
   }
 
   it('shows a spinner while the boards are loading', async () => {
-    hangingFetch()
+    // A never-resolving handler keeps the query in its initial pending state.
+    server.use(http.get(API_URLS.boards.list, () => new Promise<Response>(() => {})))
     const wrapper = await mountList()
 
     expect(wrapper.find('[data-testid="board-list-loading"]').exists()).toBe(true)
@@ -91,10 +73,7 @@ describe('BoardList', () => {
   })
 
   it('renders an empty state when the user has no boards', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse(200, [])),
-    )
+    server.use(http.get(API_URLS.boards.list, () => HttpResponse.json([])))
 
     const wrapper = await mountList()
     await settle()
@@ -104,9 +83,10 @@ describe('BoardList', () => {
   })
 
   it('renders a card per board', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse(200, [board('b1', 'Alpha'), board('b2', 'Beta')])),
+    server.use(
+      http.get(API_URLS.boards.list, () =>
+        HttpResponse.json([board('b1', 'Alpha'), board('b2', 'Beta')]),
+      ),
     )
 
     const wrapper = await mountList()
@@ -119,24 +99,22 @@ describe('BoardList', () => {
   })
 
   it('shows an error state whose retry issues a second GET', async () => {
-    const fetchMock = vi.fn<FetchImpl>(async () => jsonResponse(500, { status: 500 }))
-    vi.stubGlobal('fetch', fetchMock)
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json({ status: 500 }, { status: 500 })),
+    )
 
     const wrapper = await mountList()
     await settle()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(1)
 
     await wrapper.find('[data-testid="board-list-retry"]').trigger('click')
     await settle()
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(callsTo(API_URLS.boards.list)).toHaveLength(2)
   })
 
   it('opens the create dialog from the "Create Board" button', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse(200, [])),
-    )
+    server.use(http.get(API_URLS.boards.list, () => HttpResponse.json([])))
 
     const wrapper = await mountList()
     await settle()
@@ -150,10 +128,7 @@ describe('BoardList', () => {
   })
 
   it('hides the create affordance in the nav variant', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn<FetchImpl>(async () => jsonResponse(200, [board('b1', 'Alpha')])),
-    )
+    server.use(http.get(API_URLS.boards.list, () => HttpResponse.json([board('b1', 'Alpha')])))
 
     const wrapper = await mountList('nav')
     await settle()
@@ -162,4 +137,3 @@ describe('BoardList', () => {
     expect(wrapper.findAll('[data-testid="board-card"]')).toHaveLength(1)
   })
 })
-
