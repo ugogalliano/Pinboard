@@ -149,4 +149,42 @@ describe('router guard', () => {
 
     expect(router.currentRoute.value.path).toBe('/login')
   })
+
+  it('protects the board shell at "/" (BoardLayout)', async () => {
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(router.currentRoute.value.query.redirect).toBeUndefined()
+  })
+
+  it('protects a board deep link and carries ?redirect=/boards/:boardId', async () => {
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/boards/b1')
+
+    expect(router.currentRoute.value.path).toBe('/login')
+    expect(router.currentRoute.value.query.redirect).toBe('/boards/b1')
+  })
+
+  it('lets an authenticated user into / and into a board deep link', async () => {
+    const auth = useAuthStore()
+    // In-memory session (no refresh token) so bootstrap no-ops quickly.
+    setAccessToken('access-live')
+    auth.setUser(USER)
+    // The shell renders the board list, which reads GET /api/boards.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<FetchImpl>(async () => jsonResponse(200, [])),
+    )
+
+    const router = createAppRouter(createMemoryHistory())
+
+    await router.push('/')
+    expect(router.currentRoute.value.path).toBe('/')
+
+    await router.push('/boards/b1')
+    expect(router.currentRoute.value.path).toBe('/boards/b1')
+  })
 })

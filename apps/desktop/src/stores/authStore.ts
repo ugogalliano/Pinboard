@@ -10,6 +10,8 @@ import {
   setRefreshToken,
 } from '@/shared/services/token'
 import { apiClient, mapApiErrorStatus, ProfileLoadError } from '@/shared/services/api'
+import { HTTP_METHODS } from '@/shared/constants/constants'
+import { API_URLS } from '@/shared/constants/urls'
 import { onSessionTerminated } from '@/shared/services/session'
 import { queryClient } from '@/app/queryClient'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
@@ -60,7 +62,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** POST /api/auth/login → store tokens → load the profile. Throws on failure. */
   async function login(request: LoginRequest): Promise<void> {
-    const response = await apiClient<LoginResponse>('POST', '/api/auth/login', request)
+    const response = await apiClient<LoginResponse>(HTTP_METHODS.POST, API_URLS.auth.login, request)
     if (!response?.accessToken || !response.refreshToken) {
       throw new Error('Login did not return a complete session.')
     }
@@ -82,13 +84,13 @@ export const useAuthStore = defineStore('auth', () => {
    * Phase 3 acceptance: "user can register").
    */
   async function register(request: RegisterRequest): Promise<void> {
-    await apiClient<void>('POST', '/api/auth/register', request)
+    await apiClient<void>(HTTP_METHODS.POST, API_URLS.auth.register, request)
     await login({ email: request.email, password: request.password })
   }
 
   /** GET /api/auth/me → user. */
   async function refreshUser(): Promise<void> {
-    const me = await apiClient<MeResponse>('GET', '/api/auth/me')
+    const me = await apiClient<MeResponse>(HTTP_METHODS.GET, API_URLS.auth.me)
     setUser(me ?? null)
   }
 
@@ -102,7 +104,7 @@ export const useAuthStore = defineStore('auth', () => {
     const refreshToken = getRefreshToken()
     try {
       if (refreshToken) {
-        await apiClient<void>('POST', '/api/auth/logout', { refreshToken })
+        await apiClient<void>(HTTP_METHODS.POST, API_URLS.auth.logout, { refreshToken })
       }
     } catch {
       // Offline/failed logout must still clear the local session.
@@ -125,7 +127,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     setLoading(true)
     try {
-      const response = await apiClient<LoginResponse>('POST', '/api/auth/refresh', {
+      const response = await apiClient<LoginResponse>(HTTP_METHODS.POST, API_URLS.auth.refresh, {
         refreshToken,
       })
       if (!response?.accessToken || !response.refreshToken) {

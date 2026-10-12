@@ -1,40 +1,3 @@
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee-validate/zod'
-import { useRoute, useRouter } from 'vue-router'
-import { Button, Input } from '@ugogalliano/pm-design-system-vue'
-
-import { loginSchema } from '@/shared/validation/schemas'
-import { resolveRedirect, useAuth } from '../composables/useAuth'
-
-const router = useRouter()
-const route = useRoute()
-const { submitLogin } = useAuth()
-
-const { handleSubmit, setErrors, setFieldError, isSubmitting } = useForm({
-  validationSchema: toTypedSchema(loginSchema),
-})
-
-// Form-level credential error — rendered, never toasted (policy lives in
-// the useAuth composable; this component only renders and delegates).
-const formError = ref<string | null>(null)
-
-const onSubmit = handleSubmit(async (values) => {
-  formError.value = null
-  const ok = await submitLogin(values, {
-    setErrors,
-    setFieldError,
-    setFormMessage: (message) => {
-      formError.value = message
-    },
-  })
-  if (ok) {
-    await router.push(resolveRedirect(route.query.redirect))
-  }
-})
-</script>
-
 <template>
   <!-- Card content only (AuthLayout owns page + card chrome). The form
        mirrors the card's gap-5 rhythm per the "01 Login" frame spec. -->
@@ -79,3 +42,40 @@ const onSubmit = handleSubmit(async (values) => {
     </p>
   </form>
 </template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import { useRoute, useRouter } from 'vue-router'
+import { Button, Input } from '@ugogalliano/pm-design-system-vue'
+
+import { loginSchema } from '@/shared/validation/schemas'
+import { resolveRedirect, useAuth } from '../composables/useAuth'
+
+const router = useRouter()
+const route = useRoute()
+const { submitLogin } = useAuth()
+
+const { handleSubmit, setErrors, setFieldError, isSubmitting } = useForm({
+  validationSchema: toTypedSchema(loginSchema),
+})
+
+// Form-level credential error — rendered, never toasted (policy lives in
+// the useAuth composable; this component only renders and delegates).
+const formError = ref<string | null>(null)
+
+const onSubmit = handleSubmit(async (values) => {
+  formError.value = null
+  const ok = await submitLogin(values, {
+    setErrors,
+    setFieldError,
+    setFormMessage: (message) => {
+      formError.value = message
+    },
+  })
+  if (ok) {
+    await router.push(resolveRedirect(route.query.redirect))
+  }
+})
+</script>

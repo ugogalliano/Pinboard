@@ -1,4 +1,6 @@
 import type { LoginResponse, ProblemDetails } from '../types/api'
+import { HTTP_METHODS, type HttpMethod } from '../constants/constants'
+import { API_URLS } from '../constants/urls'
 import {
   clearTokens,
   getAccessToken,
@@ -8,7 +10,7 @@ import {
 } from './token'
 import { notifySessionTerminated } from './session'
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
+export type { HttpMethod } from '../constants/constants'
 
 /**
  * Error thrown by `apiClient` for every non-OK HTTP response. `message` is
@@ -180,8 +182,8 @@ async function refreshAccessToken(): Promise<boolean> {
 
   try {
     // Raw fetch: no Authorization header (the access token is the stale one).
-    const res = await fetch('/api/auth/refresh', {
-      method: 'POST',
+    const res = await fetch(API_URLS.auth.refresh, {
+      method: HTTP_METHODS.POST,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
     })
@@ -230,10 +232,10 @@ function refreshInFlightShared(): Promise<boolean> {
  */
 export function shouldSkipAutoRefresh(method: HttpMethod, path: string): boolean {
   const pathname = path.split('?')[0] ?? path
-  if (!pathname.startsWith('/api/auth/')) {
+  if (!pathname.startsWith(API_URLS.auth.authPrefix)) {
     return false
   }
-  return !(method === 'GET' && pathname === '/api/auth/me')
+  return !(method === HTTP_METHODS.GET && pathname === API_URLS.auth.me)
 }
 
 /**

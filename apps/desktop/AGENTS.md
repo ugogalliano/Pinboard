@@ -15,6 +15,7 @@ apps/desktop/src/
 ├── app/           # App.vue, router.ts, layouts/ (AuthLayout, BoardLayout)
 ├── features/      # auth, boards, notes, members — each with components/, composables/, index.ts
 ├── shared/        # components/{ui,layout}, composables, services, validation, types
+│   └── constants/ # constants.ts (generic, e.g. HTTP methods), urls.ts (all API URLs), note-colors.ts
 ├── stores/        # Pinia: authStore.ts, uiStore.ts
 ├── main.ts        # createApp + VueQueryPlugin (QueryClient)
 └── index.css
@@ -53,6 +54,8 @@ Key mechanics:
 - **Components**: PascalCase SFC file names (`BoardList.vue`), one component per
   file, `<script setup lang="ts">` always; `<style scoped>` only when Tailwind
   utilities are not enough. Use PascalCase in templates for custom components.
+  Blocks in every SFC are ordered template → script setup → style (a style
+  block is added last, only when Tailwind utilities are not enough).
 - **Composables**: camelCase `useXxx.ts` files returning an object of reactive
   state + actions. Feature composables wrap `useQuery`/`useMutation` and own the
   query keys for their feature. Keep them small; split before they grow into
@@ -168,7 +171,7 @@ Two stores plus the query cache — server data never lands in Pinia:
 |-------|------|-------------|
 | **Vue Query cache** | boards, notes, members (`useQuery` reads, `useMutation` writes, SignalR `setQueryData`) | in-memory cache; cleared on logout via `queryClient.clear()` |
 | `authStore` | user, accessToken, refreshToken, isLoading; login/register/logout/refresh actions | refresh token in localStorage (via `token.ts`), access token memory only |
-| `uiStore` | sidebarOpen, activeModal; transient actions (toasts live in the design system's `useToast()`, not here) | none |
+| `uiStore` | sidebarOpen, activeModal; transient actions (toasts live in the design system's `useToast()`, not here). `activeModal` is retained but unused by dialogs by design — Phase 4 dialogs own their open state locally via `v-model:open`, because two `BoardList` instances would contend for the single string slot | none |
 
 Rules:
 - Components read Pinia state with `storeToRefs` and query state via

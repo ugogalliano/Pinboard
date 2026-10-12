@@ -26,6 +26,21 @@ export default defineConfigWithVueTs(
     files: ['src/**/__tests__/*'],
   },
 
+  {
+    // PLAN.FE.md §12/§14 pin the shared component file names
+    // (Spinner.vue, Sidebar.vue, Header.vue), which are single words; the
+    // vue3-essential multi-word rule is relaxed for exactly those three
+    // FILES — scoped by path so no other component may claim the names.
+    files: [
+      'src/shared/components/layout/Header.vue',
+      'src/shared/components/layout/Sidebar.vue',
+      'src/shared/components/ui/Spinner.vue',
+    ],
+    rules: {
+      'vue/multi-word-component-names': 'off',
+    },
+  },
+
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 
   skipFormatting,

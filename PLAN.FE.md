@@ -92,7 +92,9 @@ apps/desktop/
 │   │   │   │   ├── BoardList.vue
 │   │   │   │   ├── BoardCard.vue
 │   │   │   │   ├── CreateBoardDialog.vue
-│   │   │   │   └── BoardHeader.vue
+│   │   │   │   ├── BoardHeader.vue
+│   │   │   │   ├── BoardView.vue          # /boards/:boardId shell (header + outlet)
+│   │   │   │   └── BoardCanvasPlaceholder.vue  # replaced by NoteCanvas in Phase 5
 │   │   │   ├── composables/
 │   │   │   │   ├── useBoards.ts          # useQuery/useMutation wrappers
 │   │   │   │   └── useBoard.ts
@@ -127,6 +129,10 @@ apps/desktop/
 │   │   │   └── layout/
 │   │   │       ├── Sidebar.vue
 │   │   │       └── Header.vue
+│   │   ├── constants/
+│   │   │   ├── constants.ts     # generic constants (e.g. HTTP methods)
+│   │   │   ├── urls.ts          # all API URLs (single source of truth)
+│   │   │   └── note-colors.ts   # sticky-note palette
 │   │   ├── composables/
 │   │   │   ├── useSignalR.ts
 │   │   │   └── useDebounce.ts
@@ -363,6 +369,13 @@ Actions: toggleSidebar, openModal, closeModal
 
 Toasts are owned by the design system (`useToast()` + `<Toaster />`) — module-level global store, not Pinia state (Phase 3 decision A).
 
+**Dialog visibility is local component state** (Phase 4 decision): board dialogs
+(`CreateBoardDialog`, the delete confirmation in `BoardHeader`) own their open
+state through `v-model:open` on the component itself, not `uiStore.activeModal`.
+Two `BoardList` instances (home grid + sidebar nav) would contend for the same
+single string slot, so `activeModal` / `openModal` / `closeModal` stay in the
+store, unused by dialogs by design.
+
 ### Why this split
 
 - Vue Query owns everything the server owns — caching, dedup, refetch, optimistic rollback. Mirroring that data in a Pinia store would create a second source of truth and re-implement what the library already does.
@@ -421,13 +434,18 @@ No lazy loading for MVP.
 
 ```text
 ┌─────────┬──────────────────────────────────┐
-│ Sidebar │  Header (board name, actions)     │
+│ Sidebar │  Header (brand, user, logout)   │
 │         ├──────────────────────────────────┤
 │ Boards  │                                  │
 │ list    │  Content area                    │
 │         │  (NoteCanvas or MemberList)      │
 └─────────┴──────────────────────────────────┘
 ```
+
+The shared `Header` is app chrome only — it never shows board data. The active
+board's title and its Owner-only actions (rename / delete) live in the content
+area, in `BoardHeader` (rendered by `BoardView`), so a board screen owns its own
+heading.
 
 ---
 
@@ -500,10 +518,13 @@ Same cycle for boards and members mutations (create/update/delete → invalidate
 | Component | Responsibility |
 |-----------|---------------|
 | BoardList | Renders the `['boards']` query (isPending → spinner, empty → empty state), "Create Board" button |
-| BoardCard | Board name, member count, created date. Click navigates to board |
+| BoardCard | Board name, created date; navigates to the board on click. Member count badge deferred to Phase 6 — `BoardDto` carries no member count |
 | CreateBoardDialog | Modal with VeeValidate name field (`boardNameSchema`, ≤200) → create-board mutation |
-| BoardHeader | Active board name, edit/delete (Owner only), member count badge |
+| BoardHeader | Active board title + created date, rename (Owner only), delete confirmation (Owner only). Member count badge deferred to Phase 6 |
+| BoardView | Route shell for `/boards/:boardId`: renders `BoardHeader` + the routed canvas outlet (the child route is swapped for NoteCanvas in Phase 5) |
+| BoardCanvasPlaceholder | Phase 4 stand-in for the canvas: an empty state describing the Phase 5 behaviour. Replaced by NoteCanvas |
 | useBoards | `useQuery(['boards'])` + mutations (create/update/delete) with invalidation |
+| useBoard | `useQuery(['boards', boardId])` for the single board behind the `:boardId` route param, with `keepPreviousData` so switching boards never flashes an empty header |
 
 ### Notes
 
@@ -547,7 +568,7 @@ Authorization-aware rendering:
 | Spinner | Loading indicator, centered or inline |
 | ErrorFallback | Fallback UI shown by the global error handler with retry |
 | Sidebar | Board list navigation, collapsible |
-| Header | Board name, actions, member count |
+| Header | App chrome: PostIt brand, who is signed in, log out (no board-specific content) |
 
 ---
 

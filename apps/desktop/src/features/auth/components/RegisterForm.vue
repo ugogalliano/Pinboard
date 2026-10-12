@@ -1,38 +1,3 @@
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee-validate/zod'
-import { useRouter } from 'vue-router'
-import { Button, Input } from '@ugogalliano/pm-design-system-vue'
-
-import { registerSchema } from '@/shared/validation/schemas'
-import { useAuth } from '../composables/useAuth'
-
-const router = useRouter()
-const { submitRegister } = useAuth()
-
-const { handleSubmit, setErrors, setFieldError, isSubmitting } = useForm({
-  validationSchema: toTypedSchema(registerSchema),
-})
-
-// Same form-level channel as LoginForm (policy lives in useAuth).
-const formError = ref<string | null>(null)
-
-const onSubmit = handleSubmit(async (values) => {
-  formError.value = null
-  const ok = await submitRegister(values, {
-    setErrors,
-    setFieldError,
-    setFormMessage: (message) => {
-      formError.value = message
-    },
-  })
-  if (ok) {
-    await router.push('/')
-  }
-})
-</script>
-
 <template>
   <!-- Card content only (AuthLayout owns page + card chrome). Mirrors the
        "02 Register" frame; form keeps the card's gap-5 rhythm. -->
@@ -83,3 +48,38 @@ const onSubmit = handleSubmit(async (values) => {
     </p>
   </form>
 </template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import { useRouter } from 'vue-router'
+import { Button, Input } from '@ugogalliano/pm-design-system-vue'
+
+import { registerSchema } from '@/shared/validation/schemas'
+import { useAuth } from '../composables/useAuth'
+
+const router = useRouter()
+const { submitRegister } = useAuth()
+
+const { handleSubmit, setErrors, setFieldError, isSubmitting } = useForm({
+  validationSchema: toTypedSchema(registerSchema),
+})
+
+// Same form-level channel as LoginForm (policy lives in useAuth).
+const formError = ref<string | null>(null)
+
+const onSubmit = handleSubmit(async (values) => {
+  formError.value = null
+  const ok = await submitRegister(values, {
+    setErrors,
+    setFieldError,
+    setFormMessage: (message) => {
+      formError.value = message
+    },
+  })
+  if (ok) {
+    await router.push('/')
+  }
+})
+</script>

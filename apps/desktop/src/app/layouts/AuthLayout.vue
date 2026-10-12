@@ -1,7 +1,3 @@
-<script setup lang="ts">
-import { RouterView } from 'vue-router'
-</script>
-
 <template>
   <!-- Layout = page + brand + card chrome only; the routed form renders
        the card content (Phase 3 spec F, extracted from design_pinboard.pen
@@ -22,3 +18,7 @@ import { RouterView } from 'vue-router'
     </section>
   </main>
 </template>
+
+<script setup lang="ts">
+import { RouterView } from 'vue-router'
+</script>

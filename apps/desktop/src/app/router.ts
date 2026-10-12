@@ -6,9 +6,10 @@ import {
   type RouterHistory,
 } from 'vue-router'
 
-import PlaceholderPage from '@/app/PlaceholderPage.vue'
 import AuthLayout from '@/app/layouts/AuthLayout.vue'
+import BoardLayout from '@/app/layouts/BoardLayout.vue'
 import { LoginForm, RegisterForm } from '@/features/auth'
+import { BoardCanvasPlaceholder, BoardList, BoardView } from '@/features/boards'
 import { useAuthStore } from '@/stores/authStore'
 
 declare module 'vue-router' {
@@ -23,9 +24,29 @@ declare module 'vue-router' {
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    name: 'home',
-    component: PlaceholderPage,
+    component: BoardLayout,
     meta: { requiresAuth: true },
+    children: [
+      // `requiresAuth` is inherited from the BoardLayout parent, but it is
+      // restated on every child record so a future restructure (a child
+      // moved under another layout) cannot silently drop the guard.
+      { path: '', name: 'board-list', component: BoardList, meta: { requiresAuth: true } },
+      {
+        // Nested so the canvas child can be swapped for Phase 5's NoteCanvas
+        // (and a members sibling added in Phase 6) without touching BoardView.
+        path: 'boards/:boardId',
+        component: BoardView,
+        meta: { requiresAuth: true },
+        children: [
+          {
+            path: '',
+            name: 'board-canvas',
+            component: BoardCanvasPlaceholder,
+            meta: { requiresAuth: true },
+          },
+        ],
+      },
+    ],
   },
   {
     path: '/login',

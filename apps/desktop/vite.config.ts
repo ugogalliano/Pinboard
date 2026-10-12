@@ -11,7 +11,7 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 // (and http://localhost:5180). Target is configurable via VITE_PROXY_TARGET;
 // the fallback is the real Kestrel https profile. Keep the doc conflict on
 // record here until PLAN §15 is reconciled.
-const proxyTarget = process.env.VITE_PROXY_TARGET ?? 'https://localhost:7113'
+const proxyTarget = process.env.VITE_PROXY_TARGET ?? 'http://localhost:5180'
 
 export default defineConfig({
   // Relative base for Tauri compatibility (PLAN.FE.md §15).
