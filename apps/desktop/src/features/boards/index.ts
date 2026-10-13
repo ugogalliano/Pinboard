@@ -3,7 +3,6 @@ export { default as BoardList } from './components/BoardList/BoardList.vue'
 export { default as CreateBoardDialog } from './components/CreateBoardDialog/CreateBoardDialog.vue'
 export { default as BoardHeader } from './components/BoardHeader/BoardHeader.vue'
 export { default as BoardView } from './components/BoardView/BoardView.vue'
-export { default as BoardCanvasPlaceholder } from './components/BoardCanvasPlaceholder/BoardCanvasPlaceholder.vue'
 export {
   boardsKeys,
   canManageBoard,

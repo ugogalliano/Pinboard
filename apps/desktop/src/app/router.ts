@@ -9,7 +9,8 @@ import {
 import AuthLayout from '@/app/layouts/AuthLayout/AuthLayout.vue'
 import BoardLayout from '@/app/layouts/BoardLayout/BoardLayout.vue'
 import { LoginForm, RegisterForm } from '@/features/auth'
-import { BoardCanvasPlaceholder, BoardList, BoardView } from '@/features/boards'
+import { BoardList, BoardView } from '@/features/boards'
+import { NoteCanvas } from '@/features/notes'
 import { useAuthStore } from '@/stores/authStore'
 
 declare module 'vue-router' {
@@ -40,8 +41,11 @@ const routes: RouteRecordRaw[] = [
         children: [
           {
             path: '',
+            // Phase 5: the placeholder swap is done — the canvas child renders
+            // the real NoteCanvas. The route NAME stays 'board-canvas'
+            // (BoardCard and the tests link by it).
             name: 'board-canvas',
-            component: BoardCanvasPlaceholder,
+            component: NoteCanvas,
             meta: { requiresAuth: true },
           },
         ],

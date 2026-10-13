@@ -64,6 +64,11 @@ function stubApi(seed: BoardDto[] = []): void {
         ? HttpResponse.json(board)
         : HttpResponse.json({ status: 404, detail: 'Board not found' }, { status: 404 })
     }),
+    // Phase 5: the board route renders the real NoteCanvas, so the canvas's
+    // notes GET must be answered — an empty list keeps this suite on its
+    // Phase 4 assertion surface (boards-flow owns boards, notes-flow owns
+    // notes).
+    http.get(API_URLS.notes.list(':boardId'), () => HttpResponse.json([])),
   )
 }
 
@@ -148,7 +153,7 @@ describe('boards flow (integration)', () => {
     expect(router.currentRoute.value.name).toBe('board-canvas')
     expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b2'))?.name).toBe('Team offsite')
     expect(wrapper.find('[data-testid="board-name"]').text()).toBe('Team offsite')
-    expect(wrapper.find('[data-testid="board-canvas-placeholder"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="note-canvas"]').exists()).toBe(true)
   })
 
   it('bounces guests away from "/" and from a board deep link', async () => {

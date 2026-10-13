@@ -70,76 +70,98 @@ Scaffold with `npm create vue@latest` (TypeScript, Vue Router, Pinia, Vitest, ES
 
 ## 3. Directory layout
 
+Every component lives in a folder named after it, together with its colocated
+test: `<group>/<Name>/<Name>.vue` + `<group>/<Name>/<Name>.test.ts`.
+
 ```text
 apps/desktop/
 ├── src/
 │   ├── app/
-│   │   ├── App.vue               # Root: global error handler, router-view
+│   │   ├── App/                  # Root: global error handler, router-view
+│   │   │   └── App.vue
 │   │   ├── router.ts             # Route definitions + guards
 │   │   └── layouts/
-│   │       ├── AuthLayout.vue    # Unauthenticated (login/register)
-│   │       └── BoardLayout.vue   # Authenticated (sidebar + canvas)
+│   │       ├── AuthLayout/       # Unauthenticated (login/register)
+│   │       │   └── AuthLayout.vue
+│   │       └── BoardLayout/      # Authenticated (sidebar + canvas)
+│   │           └── BoardLayout.vue
 │   ├── features/
 │   │   ├── auth/
 │   │   │   ├── components/
-│   │   │   │   ├── LoginForm.vue
-│   │   │   │   └── RegisterForm.vue
+│   │   │   │   ├── LoginForm/
+│   │   │   │   │   └── LoginForm.vue
+│   │   │   │   └── RegisterForm/
+│   │   │   │       └── RegisterForm.vue
 │   │   │   ├── composables/
 │   │   │   │   └── useAuth.ts
 │   │   │   └── index.ts
 │   │   ├── boards/
 │   │   │   ├── components/
-│   │   │   │   ├── BoardList.vue
-│   │   │   │   ├── BoardCard.vue
-│   │   │   │   ├── CreateBoardDialog.vue
-│   │   │   │   ├── BoardHeader.vue
-│   │   │   │   ├── BoardView.vue          # /boards/:boardId shell (header + outlet)
-│   │   │   │   └── BoardCanvasPlaceholder.vue  # replaced by NoteCanvas in Phase 5
+│   │   │   │   ├── BoardList/
+│   │   │   │   │   └── BoardList.vue
+│   │   │   │   ├── BoardCard/
+│   │   │   │   │   └── BoardCard.vue
+│   │   │   │   ├── CreateBoardDialog/
+│   │   │   │   │   └── CreateBoardDialog.vue
+│   │   │   │   ├── BoardHeader/
+│   │   │   │   │   └── BoardHeader.vue
+│   │   │   │   └── BoardView/              # /boards/:boardId shell (header + outlet)
+│   │   │   │       └── BoardView.vue       # Phase 5: the canvas child route is
+│   │   │   │                               # NoteCanvas; BoardCanvasPlaceholder was removed
 │   │   │   ├── composables/
 │   │   │   │   ├── useBoards.ts          # useQuery/useMutation wrappers
 │   │   │   │   └── useBoard.ts
 │   │   │   └── index.ts
 │   │   ├── notes/
 │   │   │   ├── components/
-│   │   │   │   ├── NoteCanvas.vue
-│   │   │   │   ├── PostItCard.vue
-│   │   │   │   ├── PostItEditor.vue
-│   │   │   │   └── ColorPicker.vue
+│   │   │   │   ├── NoteCanvas/
+│   │   │   │   │   └── NoteCanvas.vue
+│   │   │   │   ├── PostItCard/
+│   │   │   │   │   └── PostItCard.vue
+│   │   │   │   ├── PostItEditor/
+│   │   │   │   │   └── PostItEditor.vue
+│   │   │   │   └── ColorPicker/
+│   │   │   │       └── ColorPicker.vue
 │   │   │   ├── composables/
 │   │   │   │   ├── useNotes.ts           # useQuery/useMutation wrappers
-│   │   │   │   └── useDragNote.ts        # optimistic setQueryData + throttled PUT
+│   │   │   │   └── useDragNote.ts        # live delta transform + single debounced PUT on drop
 │   │   │   └── index.ts
 │   │   └── members/
 │   │       ├── components/
-│   │       │   ├── MemberList.vue
-│   │       │   ├── AddMemberDialog.vue
-│   │       │   └── RoleSelect.vue
+│   │       │   ├── MemberList/
+│   │       │   │   └── MemberList.vue
+│   │       │   ├── AddMemberDialog/
+│   │       │   │   └── AddMemberDialog.vue
+│   │       │   └── RoleSelect/
+│   │       │       └── RoleSelect.vue
 │   │       ├── composables/
 │   │       │   └── useMembers.ts         # useQuery/useMutation wrappers
 │   │       └── index.ts
 │   ├── shared/
 │   │   ├── components/
-│   │   │   ├── ui/
-│   │   │   │   ├── Button.vue
-│   │   │   │   ├── Input.vue
-│   │   │   │   ├── Dialog.vue
-│   │   │   │   ├── Toast.vue
-│   │   │   │   ├── Spinner.vue
-│   │   │   │   └── ErrorFallback.vue
+│   │   │   ├── ui/               # only Spinner/ is local: Button/Input/Dialog/
+│   │   │   │                     # Toast/Toaster come from the design system
+│   │   │   │                     # (@ugogalliano/pm-design-system-vue);
+│   │   │   │                     # ErrorFallback is deferred (Phase 8, §13)
+│   │   │   │   └── Spinner/
+│   │   │   │       └── Spinner.vue
 │   │   │   └── layout/
-│   │   │       ├── Sidebar.vue
-│   │   │       └── Header.vue
+│   │   │       ├── Sidebar/
+│   │   │       │   └── Sidebar.vue
+│   │   │       └── Header/
+│   │   │           └── Header.vue
 │   │   ├── constants/
 │   │   │   ├── constants.ts     # generic constants (e.g. HTTP methods)
 │   │   │   ├── urls.ts          # all API URLs (single source of truth)
 │   │   │   └── note-colors.ts   # sticky-note palette
 │   │   ├── composables/
-│   │   │   ├── useSignalR.ts
 │   │   │   └── useDebounce.ts
+│   │   │   # useSignalR.ts deferred (Phase 7 realtime)
 │   │   ├── services/
 │   │   │   ├── api.ts
-│   │   │   ├── signalr.ts
+│   │   │   ├── session.ts
 │   │   │   └── token.ts
+│   │   │   # signalr.ts deferred (Phase 7 realtime)
 │   │   ├── validation/
 │   │   │   └── schemas.ts        # Zod schemas (shared with VeeValidate)
 │   │   └── types/
@@ -489,8 +511,8 @@ Remote changes therefore appear instantly without a refetch. Use `invalidateQuer
 ### Optimistic updates (Vue Query mutation cycle)
 
 **Drag-and-drop (`useDragNote`):**
-1. `setQueryData` on `['boards', boardId, 'notes']` — move the note immediately
-2. throttled `PUT /api/notes/{noteId}` via `useMutation`
+1. Optimistic `setQueryData` on `['boards', boardId, 'notes']` — move the note immediately ON COMMIT (the debounced drop); never per pointermove
+2. single `PUT /api/notes/{noteId}` on drop (per-card debounced coalescing of successive drops) via `useMutation` — Phase 5 perf decision
 3. `onMutate`: snapshot previous cache (and `cancelQueries` for that key)
 4. `onError`: restore snapshot + error toast
 5. `onSettled`: `invalidateQueries(['boards', boardId, 'notes'])`
@@ -522,7 +544,7 @@ Same cycle for boards and members mutations (create/update/delete → invalidate
 | CreateBoardDialog | Modal with VeeValidate name field (`boardNameSchema`, ≤200) → create-board mutation |
 | BoardHeader | Active board title + created date, rename (Owner only), delete confirmation (Owner only). Member count badge deferred to Phase 6 |
 | BoardView | Route shell for `/boards/:boardId`: renders `BoardHeader` + the routed canvas outlet (the child route is swapped for NoteCanvas in Phase 5) |
-| BoardCanvasPlaceholder | Phase 4 stand-in for the canvas: an empty state describing the Phase 5 behaviour. Replaced by NoteCanvas |
+| BoardCanvasPlaceholder | Phase 4 stand-in for the canvas. Replaced by NoteCanvas in Phase 5 (folder removed) |
 | useBoards | `useQuery(['boards'])` + mutations (create/update/delete) with invalidation |
 | useBoard | `useQuery(['boards', boardId])` for the single board behind the `:boardId` route param, with `keepPreviousData` so switching boards never flashes an empty header |
 
@@ -535,13 +557,13 @@ Same cycle for boards and members mutations (create/update/delete → invalidate
 | PostItEditor | Inline editor for content + color, validated with `noteSchema` on save (≤1000 / ≤50). Save on blur/Enter, cancel on Escape |
 | ColorPicker | Predefined color palette (8-10 sticky note colors) |
 | useNotes | `useQuery`/`useMutation` over the notes key, optimistic create/delete, SignalR cache writes |
-| useDragNote | Drag state, throttled position updates, optimistic `setQueryData` with rollback |
+| useDragNote | Drag state, live transform delta, single debounced position PUT on drop (no per-move cache writes) |
 
 Canvas behavior:
 - Notes absolutely positioned within scrollable container
 - Position in pixels (matching backend positionX/positionY)
 - Canvas larger than viewport, scrollable both directions
-- New notes spawn at center of visible viewport
+- New notes spawn at the double-click point (canvas coords, scroll-compensated) — Phase 5 decision
 
 ### Members
 
@@ -607,15 +629,18 @@ Authorization-aware rendering:
 Test setup: each test installs its own plugins via `global.plugins`:
 - Pinia — `@pinia/testing` `createTestingPinia` for store isolation
 - Vue Router — memory history with the routes under test
-- Vue Query — a **fresh `QueryClient` per test** with `retry: false` and mocked `queryFn`s (never hit the network)
+- Vue Query — a **fresh `QueryClient` per test** with `retry: false`
+- Network — intercepted with **MSW** (`msw/node`, infra in `test/msw/`); handlers declared per test via `server.use(...)` with `onUnhandledRequest: 'error'`
+- Assertions — method/path/order via the request log (`requestLog` / `callsTo(path, method?)`, the optional method filter disambiguates a path used by several verbs); bodies and the `Authorization` header captured inside the handler closure, never in a life-cycle listener
 
 ### File convention
 
 ```text
 features/notes/
 ├── components/
-│   ├── NoteCanvas.vue
-│   └── NoteCanvas.test.ts
+│   └── NoteCanvas/
+│       ├── NoteCanvas.vue
+│       └── NoteCanvas.test.ts
 ├── composables/
 │   ├── useNotes.ts
 │   └── useNotes.test.ts
@@ -831,7 +856,7 @@ feat: add boards
 
 Tasks:
 - implement useNotes composable (`useQuery`/`useMutation` over `['boards', boardId, 'notes']`)
-- implement useDragNote composable (drag state, throttled updates, optimistic `setQueryData` with rollback)
+- implement useDragNote composable (drag state, single PUT on drop with per-note coalescing and optimistic `setQueryData` + rollback)
 - build NoteCanvas component (scrollable, absolutely positioned notes)
 - build PostItCard component (content, color, draggable)
 - build PostItEditor component (inline edit, `noteSchema` validation, save on blur/Enter)
