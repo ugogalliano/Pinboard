@@ -588,6 +588,7 @@ Authorization-aware rendering:
 - Owner: add member, change role, remove member
 - Editor: member list (read-only)
 - Viewer: member list (read-only)
+- Owner-row removal is hidden by the frontend only; the server remains unchanged and may allow removing an Owner when another Owner remains.
 
 ### Shared UI
 
@@ -910,7 +911,7 @@ Acceptance criteria:
 - Owner can change member role
 - Owner can remove a member
 - board member count (BoardCard and BoardHeader) reflects add/remove after invalidation, with no optimistic count change
-- Owner cannot be removed
+- The frontend offers no role-change or removal controls on Owner rows; this is a UI restriction only, and the unchanged server may allow removing an Owner if another Owner remains
 - Editor sees member list (read-only)
 - Viewer sees member list (read-only)
 - duplicate member is rejected with an error

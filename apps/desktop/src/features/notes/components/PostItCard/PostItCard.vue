@@ -2,22 +2,21 @@
   <div
     data-testid="post-it-card"
     :data-note-id="note.id"
-    class="absolute w-56 cursor-grab rounded-md p-3 pb-8 shadow-md min-h-[150px]"
+    class="absolute w-56 rounded-md p-3 pb-8 shadow-md min-h-[150px]"
     :class="
-      dragging
+      readOnly
+        ? 'cursor-default'
+        : dragging
         ? 'z-20 cursor-grabbing touch-none select-none will-change-transform'
-        : 'transition-shadow hover:shadow-lg'
+        : 'cursor-grab transition-shadow hover:shadow-lg'
     "
     :style="cardStyle"
     draggable="false"
-    @dblclick.stop="emit('edit', note.id)"
-    @pointerdown="emit('pointerdown-drag', { noteId: note.id, event: $event })"
+    @dblclick.stop="onEdit"
+    @pointerdown="onPointerdownDrag"
   >
-    <!-- Delete affordance. // Phase 6: hide write affordances for Viewer via
-         members role — no role data exists yet, and 403s already surface as
-         toasts through the composable's mapApiErrorToMessage. -->
     <Button
-      v-if="!editing"
+      v-if="!editing && !readOnly"
       variant="ghost"
       class="absolute right-1 top-1 h-6 w-6 rounded-md p-0 text-sm font-bold text-foreground/60 hover:text-destructive"
       aria-label="Delete note"
@@ -25,7 +24,7 @@
       @pointerdown.stop
       @mousedown.prevent
       @dblclick.stop
-      @click.stop="emit('delete', note.id)"
+      @click.stop="onDelete"
     >
       ✕
     </Button>
@@ -61,8 +60,10 @@ const props = withDefaults(
      *  catches up), so a zero offset always means "render from cache". */
     offsetX?: number
     offsetY?: number
+    /** No current Owner/Editor role is available to authorize note writes. */
+    readOnly?: boolean
   }>(),
-  { editing: false, dragging: false, offsetX: 0, offsetY: 0 },
+  { editing: false, dragging: false, offsetX: 0, offsetY: 0, readOnly: false },
 )
 
 const emit = defineEmits<{
@@ -74,6 +75,18 @@ const emit = defineEmits<{
 }>()
 
 const FALLBACK_HEX = '#fcf292'
+
+function onEdit(): void {
+  if (!props.readOnly) emit('edit', props.note.id)
+}
+
+function onDelete(): void {
+  if (!props.readOnly) emit('delete', props.note.id)
+}
+
+function onPointerdownDrag(event: PointerEvent): void {
+  if (!props.readOnly) emit('pointerdown-drag', { noteId: props.note.id, event })
+}
 
 // Color via inline :style from the shared palette map — never dynamic
 // `bg-${color}` classes (Tailwind cannot see them). The fallback defends

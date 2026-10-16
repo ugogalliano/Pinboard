@@ -30,15 +30,20 @@
         class="absolute left-10 top-10 max-w-sm text-sm text-muted-foreground"
         data-testid="note-canvas-empty"
       >
-        This board has no notes yet — double-click anywhere on the canvas to pin your first one.
+        {{
+          canWriteNotes
+            ? 'This board has no notes yet — double-click anywhere on the canvas to pin your first one.'
+            : 'This board has no notes yet.'
+        }}
       </p>
 
       <PostItCard
         v-for="note in notes"
         :key="note.id"
         :note="note"
-        :editing="editingId === note.id"
-        :dragging="draggingId === note.id"
+        :editing="canWriteNotes && editingId === note.id"
+        :dragging="canWriteNotes && draggingId === note.id"
+        :read-only="!canWriteNotes"
         :offset-x="visibleOffset(note).x"
         :offset-y="visibleOffset(note).y"
         @edit="startEdit"
@@ -52,7 +57,7 @@
            fresh empty editor — even at the identical pixel (review fix).
            Only ever one draft, so duplicate temps are impossible. -->
       <PostItEditor
-        v-if="draft"
+        v-if="draft && canWriteNotes"
         :key="`draft-${draft.nonce}`"
         test-id-prefix="note-draft"
         :initial-content="''"
@@ -68,10 +73,9 @@
 
       <!-- Inline edit over an existing card. Keyed by id so switching notes
            (e.g. while a save is in flight) REMOUNTS a fresh form instead of
-           showing the previous note's content (review fix: stale-form race).
-           // Phase 6: hide write affordances for Viewer via members role. -->
+           showing the previous note's content (review fix: stale-form race). -->
       <PostItEditor
-        v-else-if="editingNote"
+        v-else-if="editingNote && canWriteNotes"
         :key="editingNote.id"
         test-id-prefix="note-editor"
         :initial-content="editingNote.content"
@@ -97,6 +101,7 @@ import Spinner from '@/shared/components/ui/Spinner/Spinner.vue'
 import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
 import { normalizeRouteId } from '@/shared/composables/normalizeRouteId'
 import { NOTE_COLOR_NAMES, type NoteColor } from '@/shared/constants/note-colors'
+import { useCurrentBoardRole } from '@/features/members'
 import type { NoteDto } from '@/shared/types/api'
 import PostItCard from '../PostItCard/PostItCard.vue'
 import PostItEditor from '../PostItEditor/PostItEditor.vue'
@@ -125,6 +130,10 @@ const route = useRoute()
 const boardIdParam = computed(() => route.params.boardId)
 /** Normalized once for the mutation hooks (the query normalizes internally). */
 const boardId = computed(() => normalizeRouteId(boardIdParam.value) ?? '')
+const currentRole = useCurrentBoardRole(boardIdParam)
+const canWriteNotes = computed(
+  () => currentRole.value === 'Owner' || currentRole.value === 'Editor',
+)
 
 const { data, isPending, isError, isFetching, refetch } = useNotesQuery(boardIdParam)
 const notes = computed(() => data.value ?? [])
@@ -183,7 +192,7 @@ const editorColor = computed(() => {
 function onCanvasDblClick(event: MouseEvent): void {
   // A card double-click never reaches here (`.stop` on the card); only a
   // genuine canvas gesture opens a draft.
-  if (isPending.value || isError.value || editingId.value !== null) return
+  if (!canWriteNotes.value || isPending.value || isError.value || editingId.value !== null) return
   const surface = surfaceRef.value
   if (!surface) return
   const { x, y } = clientToCanvas(
@@ -206,6 +215,7 @@ function closeDraft(): void {
 }
 
 async function onDraftSave(values: { content: string; color: string }): Promise<void> {
+  if (!canWriteNotes.value) return
   const point = draft.value
   if (!point) return
   draftSaving.value = true
@@ -237,7 +247,7 @@ function startEdit(noteId: string): void {
   // flight REPLACES cleanly instead of being refused: the in-flight save's
   // settle handlers below are guarded on their own id, so they can neither
   // close nor error this new editor (review fix SF-1: stale-form race).
-  if (editingId.value === noteId) return
+  if (!canWriteNotes.value || editingId.value === noteId) return
   editingId.value = noteId
   editorError.value = null
   // The new note's editor starts not-saving; the previous save's `finally`
@@ -253,6 +263,7 @@ function closeEditor(): void {
 }
 
 async function onEditorSave(values: { content: string; color: string }): Promise<void> {
+  if (!canWriteNotes.value) return
   const savedId = editingId.value
   if (!savedId) return
   editorSaving.value = true
@@ -280,13 +291,14 @@ async function onEditorSave(values: { content: string; color: string }): Promise
 // ── Delete ────────────────────────────────────────────────────────────────
 // Optimistic remove + rollback + error toast all live in useDeleteNote.
 function onDelete(noteId: string): void {
+  if (!canWriteNotes.value) return
   deleteNote({ noteId })
 }
 
 // ── Drag wiring ───────────────────────────────────────────────────────────
 function startNoteDrag(note: NoteDto, event: DragPointer): void {
   // Explicit contract: never start a drag on the note currently being edited.
-  if (editingId.value === note.id) return
+  if (!canWriteNotes.value || editingId.value === note.id) return
   startDrag(note, event)
 }
 
@@ -295,15 +307,24 @@ function startNoteDrag(note: NoteDto, event: DragPointer): void {
 // render, which would change every card's `onPointerdownDrag` prop and force
 // a full re-render mid-gesture (perf review fix).
 function onCardPointerdownDrag(payload: { noteId: string; event: PointerEvent }): void {
+  if (!canWriteNotes.value) return
   const note = notes.value.find((item) => item.id === payload.noteId)
   if (note) startNoteDrag(note, payload.event)
 }
 
 function handlePointerMove(event: PointerEvent): void {
+  if (!canWriteNotes.value) {
+    cancelDrag()
+    return
+  }
   onPointerMove(event)
 }
 
 function handlePointerUp(): void {
+  if (!canWriteNotes.value) {
+    cancelDrag()
+    return
+  }
   endDrag()
 }
 

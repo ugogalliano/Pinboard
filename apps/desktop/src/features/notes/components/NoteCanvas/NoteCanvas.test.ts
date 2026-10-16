@@ -10,6 +10,7 @@ import NoteCanvas from './NoteCanvas.vue'
 import PostItCard from '../PostItCard/PostItCard.vue'
 import { notesKeys } from '../../composables/useNotes'
 import { useAuthStore } from '@/stores/authStore'
+import { membersKeys } from '@/features/members'
 import { API_URLS } from '@/shared/constants/urls'
 import { server } from '../../../../../test/msw/server'
 import { callsTo, requestLog } from '../../../../../test/msw/requests'
@@ -17,6 +18,7 @@ import type { NoteDto } from '@/shared/types/api'
 
 const BOARD = 'b1'
 const LIST_URL = API_URLS.notes.list(BOARD)
+const MEMBERS_URL = API_URLS.members.list(BOARD)
 
 function note(id: string, overrides: Partial<NoteDto> = {}): NoteDto {
   return {
@@ -51,6 +53,19 @@ describe('NoteCanvas', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     useAuthStore().setUser({ id: 'u1', email: 'a@b.co', displayName: 'Ada' })
+    server.use(
+      http.get(MEMBERS_URL, () =>
+        HttpResponse.json([
+          {
+            userId: 'u1',
+            email: 'a@b.co',
+            displayName: 'Ada',
+            role: 'Owner',
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        ]),
+      ),
+    )
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
@@ -177,7 +192,10 @@ describe('NoteCanvas', () => {
 
     expect(wrapper.find('[data-testid="note-draft"]').exists()).toBe(true)
     // Editor-first create: nothing left the browser yet.
-    expect(requestLog).toEqual([{ method: 'GET', url: LIST_URL }])
+    expect(requestLog).toEqual([
+      { method: 'GET', url: MEMBERS_URL },
+      { method: 'GET', url: LIST_URL },
+    ])
   })
 
   it('Escape closes the draft with zero POSTs', async () => {
@@ -309,7 +327,10 @@ describe('NoteCanvas', () => {
 
     expect(wrapper.find('[data-testid="note-editor"]').exists()).toBe(true)
     // The card's `.stop` keeps the gesture off the canvas handler.
-    expect(requestLog).toEqual([{ method: 'GET', url: LIST_URL }])
+    expect(requestLog).toEqual([
+      { method: 'GET', url: MEMBERS_URL },
+      { method: 'GET', url: LIST_URL },
+    ])
   })
 
   it('editor save fires ONE PUT with content/color, positions preserved', async () => {
@@ -645,5 +666,116 @@ describe('NoteCanvas', () => {
     expect(wrapper.find('[data-testid="post-it-card"]').attributes('style')).toContain(
       'rgb(160, 238, 228)', // NOTE_COLORS['note-teal']
     )
+  })
+
+  it.each(['Viewer', 'Unknown'])(
+    'keeps notes read-only for a current %s role, including stale card events',
+    async (role) => {
+      stubNotes([note('n1')])
+      server.use(
+        http.get(MEMBERS_URL, () =>
+          HttpResponse.json([
+            {
+              userId: 'u1',
+              email: 'a@b.co',
+              displayName: 'Ada',
+              role,
+              createdAt: '2026-01-01T00:00:00Z',
+            },
+          ]),
+        ),
+      )
+
+      const { wrapper } = await mountCanvas()
+      await settle()
+
+      const card = wrapper.findComponent(PostItCard)
+      expect(card.props('readOnly')).toBe(true)
+      await dblClickCanvas(wrapper, 120, 80)
+      await wrapper.find('[data-testid="post-it-card"]').trigger('dblclick')
+      card.vm.$emit('edit', 'n1')
+      card.vm.$emit('delete', 'n1')
+      card.vm.$emit('pointerdown-drag', {
+        noteId: 'n1',
+        event: new MouseEvent('pointerdown') as PointerEvent,
+      })
+      window.dispatchEvent(new MouseEvent('pointerup'))
+      await settle()
+
+      expect(wrapper.find('[data-testid="note-draft"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="note-editor"]').exists()).toBe(false)
+      expect(callsTo(LIST_URL, 'POST')).toHaveLength(0)
+      expect(callsTo(API_URLS.notes.detail('n1'), 'PUT')).toHaveLength(0)
+      expect(callsTo(API_URLS.notes.detail('n1'), 'DELETE')).toHaveLength(0)
+    },
+  )
+
+  it.each(['pending', 'failed'])(
+    'fails closed for a %s current-role query',
+    async (state) => {
+      stubNotes([note('n1')])
+      if (state === 'pending') {
+        server.use(http.get(MEMBERS_URL, () => new Promise<Response>(() => {})))
+      } else {
+        server.use(http.get(MEMBERS_URL, () => HttpResponse.json({ status: 500 }, { status: 500 })))
+      }
+
+      const { wrapper } = await mountCanvas()
+      await settle()
+
+      const card = wrapper.findComponent(PostItCard)
+      expect(card.props('readOnly')).toBe(true)
+      await dblClickCanvas(wrapper, 120, 80)
+      card.vm.$emit('edit', 'n1')
+      card.vm.$emit('delete', 'n1')
+      card.vm.$emit('pointerdown-drag', {
+        noteId: 'n1',
+        event: new MouseEvent('pointerdown') as PointerEvent,
+      })
+      window.dispatchEvent(new MouseEvent('pointerup'))
+      await settle()
+
+      expect(wrapper.find('[data-testid="note-draft"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="note-editor"]').exists()).toBe(false)
+      expect(callsTo(LIST_URL, 'POST')).toHaveLength(0)
+      expect(callsTo(API_URLS.notes.detail('n1'), 'PUT')).toHaveLength(0)
+      expect(callsTo(API_URLS.notes.detail('n1'), 'DELETE')).toHaveLength(0)
+    },
+  )
+
+  it('fails closed while a cached current role is being refetched', async () => {
+    stubNotes([note('n1')])
+    queryClient.setQueryData(membersKeys.list(BOARD), [
+      {
+        userId: 'u1',
+        email: 'a@b.co',
+        displayName: 'Ada',
+        role: 'Owner',
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    server.use(http.get(MEMBERS_URL, () => new Promise<Response>(() => {})))
+
+    const { wrapper } = await mountCanvas()
+    await settle()
+
+    const card = wrapper.findComponent(PostItCard)
+    expect(callsTo(MEMBERS_URL, 'GET')).toHaveLength(1)
+    expect(card.props('readOnly')).toBe(true)
+    await dblClickCanvas(wrapper, 120, 80)
+    card.vm.$emit('edit', 'n1')
+    card.vm.$emit('delete', 'n1')
+    card.vm.$emit('pointerdown-drag', {
+      noteId: 'n1',
+      event: new MouseEvent('pointerdown') as PointerEvent,
+    })
+    window.dispatchEvent(new MouseEvent('pointerup'))
+    await settle()
+
+    expect(wrapper.find('[data-testid="note-draft"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="note-editor"]').exists()).toBe(false)
+    expect(callsTo(LIST_URL, 'POST')).toHaveLength(0)
+    expect(callsTo(API_URLS.notes.detail('n1'), 'PUT')).toHaveLength(0)
+    expect(callsTo(API_URLS.notes.detail('n1'), 'DELETE')).toHaveLength(0)
   })
 })

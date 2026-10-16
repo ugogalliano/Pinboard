@@ -80,6 +80,20 @@ describe('PostItCard', () => {
     expect(payload.event.clientY).toBe(24)
   })
 
+  it('suppresses edit, delete, and drag affordances and events when read-only', async () => {
+    const wrapper = mount(PostItCard, { props: { note: note(), readOnly: true } })
+    const card = wrapper.find('[data-testid="post-it-card"]')
+
+    expect(wrapper.find('[data-testid="post-it-card-delete"]').exists()).toBe(false)
+    expect(card.classes()).toContain('cursor-default')
+    await card.trigger('dblclick')
+    card.element.dispatchEvent(new MouseEvent('pointerdown', { clientX: 12, clientY: 24 }))
+
+    expect(wrapper.emitted('edit')).toBeUndefined()
+    expect(wrapper.emitted('delete')).toBeUndefined()
+    expect(wrapper.emitted('pointerdown-drag')).toBeUndefined()
+  })
+
   it('applies a non-zero offset as transform and zero offsets render none', () => {
     // The canvas gates WHICH card receives a non-zero offset (live drag delta
     // or retained pending-visual); the card simply paints any non-zero offset.

@@ -4,15 +4,15 @@ import { http, HttpResponse } from 'msw'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, type Router } from 'vue-router'
-
 import App from '@/app/App/App.vue'
 import { createAppRouter } from '@/app/router'
 import { boardsKeys } from '@/features/boards'
 import { useAuthStore } from '@/stores/authStore'
 import { clearTokens } from '@/shared/services/token'
 import { API_URLS } from '@/shared/constants/urls'
+import { callsTo } from '../../../test/msw/requests'
 import { server } from '../../../test/msw/server'
-import type { BoardDto, LoginResponse } from '@/shared/types/api'
+import type { BoardDto, BoardMemberDto, LoginResponse } from '@/shared/types/api'
 
 const TOKENS: LoginResponse = {
   accessToken: 'access-1',
@@ -167,6 +167,136 @@ describe('boards flow (integration)', () => {
     expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b2'))?.name).toBe('Team offsite')
     expect(wrapper.find('[data-testid="board-name"]').text()).toBe('Team offsite')
     expect(wrapper.find('[data-testid="note-canvas"]').exists()).toBe(true)
+  })
+
+  it('refreshes authoritative member counts after add/remove, not during role updates', async () => {
+    signIn()
+    stubApi([makeBoard('b1', 'Product launch')])
+    const storedMembers: BoardMemberDto[] = [
+      {
+        userId: 'u1',
+        email: 'a@b.co',
+        displayName: 'Ada',
+        role: 'Owner',
+        createdAt: '2026-02-03T00:00:00Z',
+      },
+    ]
+    const authoritativeBoard = () => makeBoard('b1', 'Product launch')
+    let releaseAdd!: () => void
+    let notifyAddStarted!: () => void
+    const addStarted = new Promise<void>((resolve) => {
+      notifyAddStarted = resolve
+    })
+    let releaseRemove!: () => void
+    let notifyRemoveStarted!: () => void
+    const removeStarted = new Promise<void>((resolve) => {
+      notifyRemoveStarted = resolve
+    })
+
+    server.use(
+      http.get(API_URLS.boards.list, () =>
+        HttpResponse.json([{ ...authoritativeBoard(), memberCount: storedMembers.length }]),
+      ),
+      http.get(API_URLS.boards.detail('b1'), () =>
+        HttpResponse.json({ ...authoritativeBoard(), memberCount: storedMembers.length }),
+      ),
+      http.get(API_URLS.members.list('b1'), () => HttpResponse.json(storedMembers)),
+      http.post(API_URLS.members.list('b1'), async ({ request }) => {
+        const body = (await request.json()) as { email: string; role: 'Editor' | 'Viewer' }
+        await new Promise<void>((resolve) => {
+          releaseAdd = resolve
+          notifyAddStarted()
+        })
+        const created: BoardMemberDto = {
+          userId: 'u2',
+          email: body.email,
+          displayName: 'Grace Hopper',
+          role: body.role,
+          createdAt: '2026-02-04T00:00:00Z',
+        }
+        storedMembers.push(created)
+        return HttpResponse.json(created)
+      }),
+      http.put(API_URLS.members.detail('b1', 'u2'), async ({ request }) => {
+        const body = (await request.json()) as { role: 'Editor' | 'Viewer' }
+        const updated = { ...storedMembers[1]!, role: body.role }
+        storedMembers[1] = updated
+        return HttpResponse.json(updated)
+      }),
+      http.delete(API_URLS.members.detail('b1', 'u2'), async () => {
+        await new Promise<void>((resolve) => {
+          releaseRemove = resolve
+          notifyRemoveStarted()
+        })
+        storedMembers.splice(1, 1)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    const { wrapper, router } = await mountApp()
+    await settle()
+    await router.push('/boards/b1')
+    await settle()
+    expect(wrapper.find('[data-testid="board-header"]').text()).toContain('1 member')
+    expect(queryClient.getQueryData<BoardDto[]>(boardsKeys.all)?.[0]?.memberCount).toBe(1)
+    expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b1'))?.memberCount).toBe(1)
+
+    await router.push('/boards/b1/members')
+    await settle()
+    await wrapper.find('[data-testid="add-member"]').trigger('click')
+    await flushPromises()
+    const email = document.querySelector<HTMLInputElement>('#add-member-email')!
+    email.value = 'grace@example.com'
+    email.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    document.querySelector<HTMLButtonElement>('[data-testid="add-member-submit"]')!.click()
+    await addStarted
+    await flushPromises()
+
+    // The client has no memberCount arithmetic: counts stay authoritative until
+    // the successful POST updates server state and exact invalidations refetch.
+    expect(wrapper.find('[data-testid="board-header"]').text()).toContain('1 member')
+    expect(queryClient.getQueryData<BoardDto[]>(boardsKeys.all)?.[0]?.memberCount).toBe(1)
+    expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b1'))?.memberCount).toBe(1)
+    releaseAdd()
+    await settle()
+
+    expect(storedMembers).toHaveLength(2)
+    expect(wrapper.find('[data-testid="board-header"]').text()).toContain('2 members')
+    expect(wrapper.findAll('[data-testid="board-card"]').some((card) => card.text().includes('2 members'))).toBe(true)
+    expect(queryClient.getQueryData<BoardDto[]>(boardsKeys.all)?.[0]?.memberCount).toBe(2)
+    expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b1'))?.memberCount).toBe(2)
+    expect(callsTo(API_URLS.boards.list, 'GET').length).toBeGreaterThan(1)
+    expect(callsTo(API_URLS.boards.detail('b1'), 'GET').length).toBeGreaterThan(0)
+
+    const listGetsBeforeRoleUpdate = callsTo(API_URLS.boards.list, 'GET').length
+    const detailGetsBeforeRoleUpdate = callsTo(API_URLS.boards.detail('b1'), 'GET').length
+    await wrapper.find('[data-testid="role-select-u2"]').setValue('Viewer')
+    await settle()
+    expect(storedMembers[1]?.role).toBe('Viewer')
+    expect(callsTo(API_URLS.boards.list, 'GET')).toHaveLength(listGetsBeforeRoleUpdate)
+    expect(callsTo(API_URLS.boards.detail('b1'), 'GET')).toHaveLength(detailGetsBeforeRoleUpdate)
+    expect(queryClient.getQueryData<BoardDto[]>(boardsKeys.all)?.[0]?.memberCount).toBe(2)
+    expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b1'))?.memberCount).toBe(2)
+
+    await wrapper.find('[data-testid="remove-member-u2"]').trigger('click')
+    await flushPromises()
+    document.querySelector<HTMLButtonElement>('[data-testid="confirm-remove-member"]')!.click()
+    await removeStarted
+    await flushPromises()
+    expect(wrapper.find('[data-testid="board-header"]').text()).toContain('2 members')
+    expect(queryClient.getQueryData<BoardDto[]>(boardsKeys.all)?.[0]?.memberCount).toBe(2)
+    expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b1'))?.memberCount).toBe(2)
+    releaseRemove()
+    await settle()
+
+    expect(storedMembers).toHaveLength(1)
+    expect(wrapper.find('[data-testid="board-header"]').text()).toContain('1 member')
+    expect(wrapper.findAll('[data-testid="board-card"]').some((card) => card.text().includes('1 member'))).toBe(true)
+    expect(queryClient.getQueryData<BoardDto[]>(boardsKeys.all)?.[0]?.memberCount).toBe(1)
+    expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b1'))?.memberCount).toBe(1)
+    expect(callsTo(API_URLS.boards.list, 'GET').length).toBeGreaterThan(listGetsBeforeRoleUpdate)
+    expect(callsTo(API_URLS.boards.detail('b1'), 'GET').length).toBeGreaterThan(detailGetsBeforeRoleUpdate)
   })
 
   it('bounces guests away from "/" and from a board deep link', async () => {

@@ -72,6 +72,17 @@ function stubApi(seed: NoteDto[] = []): { stored: NoteDto[]; postBodies: unknown
     }),
 
     http.get(API_URLS.notes.list(':boardId'), () => HttpResponse.json(stored)),
+    http.get(API_URLS.members.list(':boardId'), () =>
+      HttpResponse.json([
+        {
+          userId: 'u1',
+          email: 'a@b.co',
+          displayName: 'Ada',
+          role: 'Owner',
+          createdAt: '2026-02-03T00:00:00Z',
+        },
+      ]),
+    ),
     http.post(API_URLS.notes.list(':boardId'), async ({ request }) => {
       const body = (await request.json()) as Partial<NoteDto>
       postBodies.push(body)
