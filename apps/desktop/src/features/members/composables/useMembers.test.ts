@@ -159,6 +159,26 @@ describe('useMembersQuery', () => {
     expect(role.value).toBe('Viewer')
   })
 
+  it('returns null when the signed-in member has an unrecognized runtime role', async () => {
+    useAuthStore().setUser({ id: 'u9', email: 'u9@example.com', displayName: 'User 9' })
+    const invalidRoleMember = {
+      ...member('u9'),
+      role: 'Administrator',
+    } as unknown as BoardMemberDto
+    server.use(http.get(MEMBERS_URL, () => HttpResponse.json([invalidRoleMember])))
+    let role!: ReturnType<typeof useCurrentBoardRole>
+    const Harness = defineComponent({
+      setup() {
+        role = useCurrentBoardRole(BOARD)
+        return () => h('div')
+      },
+    })
+    mount(Harness, { global: { plugins: [pinia, [VueQueryPlugin, { queryClient }]] } })
+    await settle()
+
+    expect(role.value).toBeNull()
+  })
+
   it('returns null for unknown membership and while a new board role is loading', async () => {
     useAuthStore().setUser({ id: 'u2', email: 'u2@example.com', displayName: 'User 2' })
     server.use(

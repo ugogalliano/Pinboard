@@ -62,7 +62,8 @@ export function useCurrentBoardRole(
     const userId = authStore.user?.id
     if (!userId) return null
 
-    return members.data.value?.find((item) => item.userId === userId)?.role ?? null
+    const role = members.data.value?.find((item) => item.userId === userId)?.role
+    return role === 'Owner' || role === 'Editor' || role === 'Viewer' ? role : null
   })
 }
 
