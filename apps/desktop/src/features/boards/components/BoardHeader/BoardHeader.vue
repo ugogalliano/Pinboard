@@ -60,6 +60,9 @@
             <p class="text-sm text-muted-foreground">
               Created {{ new Date(board.createdAt).toLocaleDateString() }}
             </p>
+            <p class="text-sm text-muted-foreground">
+              {{ board.memberCount }} {{ board.memberCount === 1 ? 'member' : 'members' }}
+            </p>
           </template>
         </div>
 

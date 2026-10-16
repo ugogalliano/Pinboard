@@ -11,6 +11,7 @@ const BOARD: BoardDto = {
   createdBy: 'u1',
   createdAt: '2026-02-03T00:00:00Z',
   updatedAt: '2026-02-03T00:00:00Z',
+  memberCount: 1,
 }
 
 async function makeStubRouter(): Promise<Router> {
@@ -31,6 +32,21 @@ async function makeStubRouter(): Promise<Router> {
 }
 
 describe('BoardCard', () => {
+  it.each([
+    { count: 0, variant: 'card' as const, label: '0 members' },
+    { count: 1, variant: 'nav' as const, label: '1 member' },
+    { count: 3, variant: 'card' as const, label: '3 members' },
+    { count: 3, variant: 'nav' as const, label: '3 members' },
+  ])('renders $label for the $variant variant', async ({ count, variant, label }) => {
+    const router = await makeStubRouter()
+    const wrapper = mount(BoardCard, {
+      global: { plugins: [router] },
+      props: { board: { ...BOARD, memberCount: count }, variant },
+    })
+
+    expect(wrapper.text()).toContain(label)
+  })
+
   it('renders the board name as text and links to the board canvas', async () => {
     const router = await makeStubRouter()
     const wrapper = mount(BoardCard, { global: { plugins: [router] }, props: { board: BOARD } })

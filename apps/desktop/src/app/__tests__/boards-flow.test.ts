@@ -27,6 +27,7 @@ function makeBoard(id: string, name: string): BoardDto {
     createdBy: 'u1',
     createdAt: '2026-02-03T00:00:00Z',
     updatedAt: '2026-02-03T00:00:00Z',
+    memberCount: 1,
   }
 }
 

@@ -23,6 +23,7 @@ function board(overrides: Partial<BoardDto> = {}): BoardDto {
     createdBy: 'u1',
     createdAt: '2026-02-03T00:00:00Z',
     updatedAt: '2026-02-03T00:00:00Z',
+    memberCount: 1,
     ...overrides,
   }
 }
@@ -108,6 +109,24 @@ describe('BoardHeader', () => {
     expect(wrapper.find('[data-testid="board-name"]').text()).toBe('Product launch')
     expect(wrapper.find('[data-testid="rename-board"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="delete-board"]').exists()).toBe(false)
+  })
+
+  it.each([
+    { count: 0, label: '0 members' },
+    { count: 1, label: '1 member' },
+    { count: 3, label: '3 members' },
+  ])('renders the board member count as "$label"', async ({ count, label }) => {
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board({ memberCount: count })])),
+      http.get(API_URLS.boards.detail('b1'), () =>
+        HttpResponse.json(board({ memberCount: count })),
+      ),
+    )
+
+    const { wrapper } = mountHeader()
+    await settle()
+
+    expect(wrapper.text()).toContain(label)
   })
 
   it('rejects an over-limit name inline (Zod) without issuing the PUT', async () => {

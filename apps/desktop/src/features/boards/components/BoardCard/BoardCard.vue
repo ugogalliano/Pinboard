@@ -11,6 +11,9 @@
       <span v-if="isActive" class="text-xs font-medium text-primary">Current</span>
     </span>
     <span class="mt-0.5 block text-xs text-muted-foreground">{{ createdLabel }}</span>
+    <span class="mt-0.5 block text-xs text-muted-foreground">
+      {{ board.memberCount }} {{ board.memberCount === 1 ? 'member' : 'members' }}
+    </span>
   </RouterLink>
 </template>
 

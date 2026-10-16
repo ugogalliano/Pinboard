@@ -44,6 +44,7 @@ export interface BoardDto {
   createdBy: string
   createdAt: string
   updatedAt: string
+  memberCount: number
 }
 
 export interface CreateBoardRequest {

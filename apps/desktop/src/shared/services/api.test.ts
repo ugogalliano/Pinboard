@@ -22,7 +22,7 @@ import { callsTo } from '../../../test/msw/requests'
 import type { BoardDto, ProblemDetails } from '../types/api'
 
 const BOARDS: BoardDto[] = [
-  { id: 'b1', name: 'Launch', createdBy: 'u1', createdAt: '', updatedAt: '' },
+  { id: 'b1', name: 'Launch', createdBy: 'u1', createdAt: '', updatedAt: '', memberCount: 1 },
 ]
 
 /** The baseline "stale token" response reused across the refresh tests. */
