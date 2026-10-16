@@ -1,6 +1,6 @@
 <template>
   <Dialog
-    :open="open"
+    :open="open && isOwner"
     title="Add a board member"
     description="Invite someone to collaborate on this board."
     :dismissable="!isSubmitting"
@@ -22,6 +22,7 @@
         label="Email address"
         placeholder="you@example.com"
         required
+        :disabled="isSubmitting || !isOwner"
       />
       <label for="add-member-role" class="flex flex-col gap-1.5 text-sm font-medium text-foreground">
         Role
@@ -29,7 +30,7 @@
           id="add-member-role"
           name="role"
           :value="roleField.value.value"
-          :disabled="isSubmitting"
+          :disabled="isSubmitting || !isOwner"
           class="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           @change="roleField.handleChange"
         >
@@ -51,7 +52,7 @@
       <Button
         variant="secondary"
         data-testid="cancel-add-member"
-        :disabled="isSubmitting"
+        :disabled="isSubmitting || !isOwner"
         @click="close"
         >Cancel</Button
       >
@@ -59,7 +60,7 @@
         data-testid="add-member-submit"
         type="button"
         :loading="isSubmitting"
-        :disabled="isSubmitting"
+        :disabled="isSubmitting || !isOwner"
         @click="onSubmit"
       >
         Add member
@@ -77,7 +78,7 @@ import { Button, Dialog, Input } from '@ugogalliano/pm-design-system-vue'
 import { memberSchema } from '@/shared/validation/schemas'
 import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
 import type { AssignableRole } from '@/shared/types/api'
-import { useAddMember } from '../../composables/useMembers'
+import { useAddMember, useCurrentBoardRole } from '../../composables/useMembers'
 
 const props = defineProps<{ boardId: string; open: boolean }>()
 const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
@@ -89,10 +90,20 @@ const { handleSubmit, isSubmitting, resetForm } = useForm({
 const roleField = useField<AssignableRole>('role')
 const formError = ref<string | null>(null)
 const { mutateAsync } = useAddMember(computed(() => props.boardId))
+const currentRole = useCurrentBoardRole(computed(() => props.boardId))
+const isOwner = computed(() => currentRole.value === 'Owner')
 
 function close(): void {
   emit('update:open', false)
 }
+
+watch(
+  isOwner,
+  (owner) => {
+    if (!owner && props.open) close()
+  },
+  { flush: 'sync' },
+)
 
 watch(
   () => props.open,
@@ -106,6 +117,10 @@ watch(
 )
 
 const onSubmit = handleSubmit(async (values) => {
+  if (!isOwner.value) {
+    close()
+    return
+  }
   formError.value = null
   try {
     await mutateAsync(values)

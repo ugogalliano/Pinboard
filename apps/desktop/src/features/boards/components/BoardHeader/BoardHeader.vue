@@ -19,7 +19,7 @@
     <template v-else-if="board">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="flex flex-col gap-1">
-          <template v-if="renaming">
+          <template v-if="renaming && canManage">
             <p
               v-if="renameError"
               role="alert"
@@ -32,13 +32,13 @@
                 id="rename-board-name"
                 name="name"
                 label="Board name"
-                :disabled="isRenaming"
+                :disabled="isRenaming || !canManage"
                 required
               />
               <Button
                 type="button"
                 :loading="isRenaming"
-                :disabled="isRenaming"
+                :disabled="isRenaming || !canManage"
                 data-testid="rename-board-save"
                 @click="submitRename"
               >
@@ -77,10 +77,10 @@
           <!-- Owner-only actions: the API rejects rename/delete for everyone
                else (403), so they are hidden rather than disabled. -->
           <div v-if="canManage && !renaming" class="flex items-center gap-2">
-            <Button variant="secondary" data-testid="rename-board" @click="renaming = true"
+            <Button variant="secondary" data-testid="rename-board" @click="openRename"
               >Rename</Button
             >
-            <Button variant="destructive" data-testid="delete-board" @click="deleteOpen = true">
+            <Button variant="destructive" data-testid="delete-board" @click="openDelete">
               Delete
             </Button>
           </div>
@@ -88,7 +88,7 @@
       </div>
 
       <Dialog
-        :open="deleteOpen"
+        :open="deleteOpen && canManage"
         title="Delete this board?"
         description="Deleting a board is permanent: every note it contains is removed too."
         :dismissable="!isDeleting"
@@ -112,7 +112,7 @@
             data-testid="confirm-delete-board"
             type="button"
             :loading="isDeleting"
-            :disabled="isDeleting"
+            :disabled="isDeleting || !canManage"
             @click="confirmDelete"
           >
             Delete board
@@ -194,7 +194,10 @@ const { mutateAsync: updateBoard } = useUpdateBoard()
 // be caught HERE: an escaping rejection is an unhandledrejection that
 // app.config.errorHandler never sees.
 const submitRename = handleSubmit(async (values) => {
-  if (!board.value) return
+  if (!canManage.value || !board.value) {
+    renaming.value = false
+    return
+  }
   renameError.value = null
   try {
     await updateBoard({ id: board.value.id, name: values.name })
@@ -217,8 +220,30 @@ function retry(): void {
 const deleteOpen = ref(false)
 const { mutateAsync: deleteBoard, isPending: isDeleting } = useDeleteBoard()
 
+watch(
+  canManage,
+  (owner) => {
+    if (owner) return
+    renaming.value = false
+    deleteOpen.value = false
+    renameError.value = null
+  },
+  { flush: 'sync' },
+)
+
+function openRename(): void {
+  if (canManage.value) renaming.value = true
+}
+
+function openDelete(): void {
+  if (canManage.value) deleteOpen.value = true
+}
+
 async function confirmDelete(): Promise<void> {
-  if (!board.value) return
+  if (!canManage.value || !board.value) {
+    deleteOpen.value = false
+    return
+  }
   try {
     await deleteBoard(board.value.id)
     toast({ variant: 'success', message: 'Board deleted' })

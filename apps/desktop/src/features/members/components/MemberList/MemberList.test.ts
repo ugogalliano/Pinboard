@@ -6,6 +6,7 @@ import { http, HttpResponse } from 'msw'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
 
 import MemberList from './MemberList.vue'
+import RoleSelect from '../RoleSelect/RoleSelect.vue'
 import { useAuthStore } from '@/stores/authStore'
 import { API_URLS } from '@/shared/constants/urls'
 import { membersKeys } from '@/features/members'
@@ -139,6 +140,73 @@ describe('MemberList', () => {
     expect(wrapper.find('[data-testid="role-select-u2"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="remove-member-u2"]').exists()).toBe(false)
     expect(queryClient.getQueryData(membersKeys.list(BOARD))).toEqual(cachedMembers)
+  })
+
+  it('hides role controls and sends no PUT while the Owner role is being refetched', async () => {
+    let memberReads = 0
+    let resolveRefetch!: () => void
+    const refetchGate = new Promise<void>((resolve) => {
+      resolveRefetch = resolve
+    })
+    let putRequests = 0
+    server.use(
+      http.get(MEMBERS_URL, async () => {
+        memberReads += 1
+        if (memberReads > 1) await refetchGate
+        return HttpResponse.json([member('u1', memberReads === 1 ? 'Owner' : 'Viewer'), member('u2', 'Editor')])
+      }),
+      http.put(API_URLS.members.detail(BOARD, 'u2'), () => {
+        putRequests += 1
+        return HttpResponse.json(member('u2', 'Viewer'))
+      }),
+    )
+    const wrapper = mountList()
+    await settle()
+    expect(wrapper.findComponent(RoleSelect).exists()).toBe(true)
+
+    const refetch = queryClient.invalidateQueries({ queryKey: membersKeys.list(BOARD), exact: true })
+    await flushPromises()
+    expect(queryClient.isFetching({ queryKey: membersKeys.list(BOARD), exact: true })).toBe(1)
+    expect(wrapper.find('[data-testid="role-select-u2"]').exists()).toBe(false)
+    expect(putRequests).toBe(0)
+    resolveRefetch()
+    await refetch
+    await settle()
+
+    expect(wrapper.find('[data-testid="role-select-u2"]').exists()).toBe(false)
+    expect(putRequests).toBe(0)
+  })
+
+  it('closes an open remove confirmation and refuses DELETE after the role refetch errors', async () => {
+    let memberReads = 0
+    let deleteRequests = 0
+    server.use(
+      http.get(MEMBERS_URL, () => {
+        memberReads += 1
+        return memberReads === 1
+          ? HttpResponse.json([member('u1', 'Owner'), member('u2', 'Editor')])
+          : HttpResponse.json({ status: 500 }, { status: 500 })
+      }),
+      http.delete(API_URLS.members.detail(BOARD, 'u2'), () => {
+        deleteRequests += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const wrapper = mountList()
+    await settle()
+    await wrapper.find('[data-testid="remove-member-u2"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[data-testid="confirm-remove-member"]')).not.toBeNull()
+
+    await queryClient.invalidateQueries({ queryKey: membersKeys.list(BOARD), exact: true })
+    await settle()
+    document.querySelector<HTMLButtonElement>('[data-testid="confirm-remove-member"]')?.click()
+    await settle()
+
+    expect(memberReads).toBe(2)
+    expect(wrapper.find('[data-testid="members-error"]').exists()).toBe(true)
+    expect(document.querySelector('[data-testid="confirm-remove-member"]')).toBeNull()
+    expect(deleteRequests).toBe(0)
   })
 
   it('renders query error with a retry affordance and recovers', async () => {

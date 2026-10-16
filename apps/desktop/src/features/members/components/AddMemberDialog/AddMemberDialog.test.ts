@@ -7,12 +7,23 @@ import { useToast } from '@ugogalliano/pm-design-system-vue'
 
 import AddMemberDialog from './AddMemberDialog.vue'
 import { useAuthStore } from '@/stores/authStore'
+import { membersKeys } from '@/features/members'
 import { API_URLS } from '@/shared/constants/urls'
 import { server } from '../../../../../test/msw/server'
 import { requestLog } from '../../../../../test/msw/requests'
 
 const BOARD = 'b1'
 const MEMBERS_URL = API_URLS.members.list(BOARD)
+
+function membership(role: 'Owner' | 'Viewer') {
+  return {
+    userId: 'u1',
+    email: 'u1@example.com',
+    displayName: 'Ada Lovelace',
+    role,
+    createdAt: '2026-02-03T00:00:00Z',
+  }
+}
 
 async function settle(): Promise<void> {
   await flushPromises()
@@ -52,7 +63,7 @@ describe('AddMemberDialog', () => {
   it('submits a valid editor invite and emits update:open false', async () => {
     let body: unknown
     server.use(
-      http.get(MEMBERS_URL, () => HttpResponse.json([])),
+      http.get(MEMBERS_URL, () => HttpResponse.json([membership('Owner')])),
       http.post(MEMBERS_URL, async ({ request }) => {
         body = await request.json()
         return HttpResponse.json({
@@ -84,7 +95,7 @@ describe('AddMemberDialog', () => {
     { email: 'not-an-email', role: 'Editor', field: 'email' },
     { email: 'grace@example.com', role: 'Owner', field: 'role' },
   ])('rejects invalid $field without issuing POST', async ({ email, role, field }) => {
-    server.use(http.get(MEMBERS_URL, () => HttpResponse.json([])))
+    server.use(http.get(MEMBERS_URL, () => HttpResponse.json([membership('Owner')])))
     mountDialog()
     await settle()
 
@@ -109,7 +120,7 @@ describe('AddMemberDialog', () => {
 
   it('shows safe actionable conflict feedback without an unhandled rejection or extra toast', async () => {
     server.use(
-      http.get(MEMBERS_URL, () => HttpResponse.json([])),
+      http.get(MEMBERS_URL, () => HttpResponse.json([membership('Owner')])),
       http.post(MEMBERS_URL, () =>
         HttpResponse.json({ status: 409 }, { status: 409 }),
       ),
@@ -138,7 +149,7 @@ describe('AddMemberDialog', () => {
   })
 
   it('emits closure on cancel and starts each new opening with a clean form', async () => {
-    server.use(http.get(MEMBERS_URL, () => HttpResponse.json([])))
+    server.use(http.get(MEMBERS_URL, () => HttpResponse.json([membership('Owner')])))
     const onUpdateOpen = vi.fn<(value: boolean) => void>()
     const wrapper = mountDialog(true, onUpdateOpen)
     await settle()
@@ -150,5 +161,43 @@ describe('AddMemberDialog', () => {
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(document.querySelector<HTMLInputElement>('#add-member-email')?.value).toBe('')
+  })
+
+  it('closes and refuses an invite after the role refetch changes Owner to Viewer', async () => {
+    let memberReads = 0
+    let addRequests = 0
+    server.use(
+      http.get(MEMBERS_URL, () => {
+        memberReads += 1
+        return HttpResponse.json([membership(memberReads === 1 ? 'Owner' : 'Viewer')])
+      }),
+      http.post(MEMBERS_URL, () => {
+        addRequests += 1
+        return HttpResponse.json({
+          userId: 'u2',
+          email: 'grace@example.com',
+          displayName: 'Grace Hopper',
+          role: 'Editor',
+          createdAt: '2026-02-03T00:00:00Z',
+        })
+      }),
+    )
+    mountDialog(true)
+    await settle()
+    const email = document.querySelector<HTMLInputElement>('#add-member-email')!
+    email.value = 'grace@example.com'
+    email.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    await queryClient.invalidateQueries({ queryKey: membersKeys.list(BOARD), exact: true })
+    await settle()
+
+    const submit = document.querySelector<HTMLButtonElement>('[data-testid="add-member-submit"]')
+    submit?.click()
+    await settle()
+
+    expect(memberReads).toBe(2)
+    expect(document.querySelector('#add-member-email')).toBeNull()
+    expect(addRequests).toBe(0)
   })
 })

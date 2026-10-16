@@ -8,7 +8,7 @@
       <Button
         v-if="isOwner"
         data-testid="add-member"
-        @click="addOpen = true"
+        @click="openAddDialog"
         >Add member</Button
       >
     </div>
@@ -64,7 +64,7 @@
             v-if="isOwner && member.role !== 'Owner'"
             variant="destructive"
             :data-testid="`remove-member-${member.userId}`"
-            @click="selectedForRemoval = member"
+            @click="openRemoveDialog(member)"
           >
             Remove
           </Button>
@@ -75,7 +75,7 @@
     <AddMemberDialog v-model:open="addOpen" :board-id="boardId" />
 
     <Dialog
-      :open="Boolean(selectedForRemoval)"
+      :open="isRemovalAllowed"
       :title="`Remove ${selectedForRemoval?.displayName ?? 'member'} from this board?`"
       description="They will no longer be able to access this board."
       :dismissable="!isRemoving"
@@ -97,7 +97,7 @@
           variant="destructive"
           data-testid="confirm-remove-member"
           :loading="isRemoving"
-          :disabled="isRemoving"
+          :disabled="isRemoving || !isRemovalAllowed"
           @click="confirmRemove"
           >Remove member</Button
         >
@@ -107,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Button, Dialog } from '@ugogalliano/pm-design-system-vue'
 
 import Spinner from '@/shared/components/ui/Spinner/Spinner.vue'
@@ -130,14 +130,41 @@ const members = computed(() => data.value ?? [])
 const isOwner = computed(() => currentRole.value === 'Owner')
 const addOpen = ref(false)
 const selectedForRemoval = ref<BoardMemberDto | null>(null)
+const isRemovalAllowed = computed(() => {
+  const selected = selectedForRemoval.value
+  if (!isOwner.value || !selected || selected.role === 'Owner') return false
+  return members.value.some((member) => member.userId === selected.userId && member.role !== 'Owner')
+})
 const { mutateAsync: updateMember, isPending: isUpdating } = useUpdateMember(boardId)
 const { mutateAsync: removeMember, isPending: isRemoving } = useRemoveMember(boardId)
+
+watch(
+  isOwner,
+  (owner) => {
+    if (owner) return
+    addOpen.value = false
+    selectedForRemoval.value = null
+  },
+  { flush: 'sync' },
+)
 
 function retry(): void {
   void refetch()
 }
 
+function openAddDialog(): void {
+  if (isOwner.value) addOpen.value = true
+}
+
+function openRemoveDialog(member: BoardMemberDto): void {
+  const currentMember = members.value.find((item) => item.userId === member.userId)
+  if (!isOwner.value || !currentMember || currentMember.role === 'Owner') return
+  selectedForRemoval.value = currentMember
+}
+
 async function changeRole(userId: string, role: AssignableRole): Promise<void> {
+  const member = members.value.find((item) => item.userId === userId)
+  if (!isOwner.value || !member || member.role === 'Owner') return
   try {
     await updateMember({ userId, role })
   } catch {
@@ -151,9 +178,13 @@ function onRemoveDialogOpen(open: boolean): void {
 
 async function confirmRemove(): Promise<void> {
   const member = selectedForRemoval.value
-  if (!member) return
+  const currentMember = member && members.value.find((item) => item.userId === member.userId)
+  if (!isOwner.value || !member || !currentMember || currentMember.role === 'Owner') {
+    selectedForRemoval.value = null
+    return
+  }
   try {
-    await removeMember(member.userId)
+    await removeMember(currentMember.userId)
     selectedForRemoval.value = null
   } catch {
     // Rollback and the single safe error toast live in the mutation composable.

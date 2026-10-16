@@ -11,6 +11,7 @@ import { useToast } from '@ugogalliano/pm-design-system-vue'
 import BoardHeader from './BoardHeader.vue'
 import { useBoards } from '../../composables/useBoards'
 import { useAuthStore } from '@/stores/authStore'
+import { membersKeys } from '@/features/members'
 import { API_URLS } from '@/shared/constants/urls'
 import { server } from '../../../../../test/msw/server'
 import { requestLog } from '../../../../../test/msw/requests'
@@ -146,6 +147,72 @@ describe('BoardHeader', () => {
     const membersLink = wrapper.find('[data-testid="board-members-link"]')
     expect(membersLink.exists()).toBe(true)
     expect(membersLink.attributes('href')).toBe('/boards/b1/members')
+  })
+
+  it('closes the rename form and refuses PUT after the Owner role changes to Viewer', async () => {
+    let memberReads = 0
+    let putRequests = 0
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board()])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board())),
+      http.get(API_URLS.members.list('b1'), () => {
+        memberReads += 1
+        return HttpResponse.json([membership(memberReads === 1 ? 'Owner' : 'Viewer')])
+      }),
+      http.put(API_URLS.boards.detail('b1'), () => {
+        putRequests += 1
+        return HttpResponse.json(board({ name: 'Unexpected rename' }))
+      }),
+    )
+    const { wrapper } = mountHeader()
+    await settle()
+    await wrapper.find('[data-testid="rename-board"]').trigger('click')
+    await flushPromises()
+    await typeInto(wrapper, '#rename-board-name', 'Should not save')
+
+    await queryClient.invalidateQueries({ queryKey: membersKeys.list('b1'), exact: true })
+    await settle()
+    const save = wrapper.find('[data-testid="rename-board-save"]')
+    if (save.exists()) await save.trigger('click')
+    await settle()
+
+    expect(memberReads).toBe(2)
+    expect(wrapper.find('#rename-board-name').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="rename-board"]').exists()).toBe(false)
+    expect(putRequests).toBe(0)
+  })
+
+  it('closes the delete confirmation and refuses DELETE if the Owner role refetch fails', async () => {
+    let memberReads = 0
+    let deleteRequests = 0
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board()])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board())),
+      http.get(API_URLS.members.list('b1'), () => {
+        memberReads += 1
+        return memberReads === 1
+          ? HttpResponse.json([membership('Owner')])
+          : HttpResponse.json({ status: 500 }, { status: 500 })
+      }),
+      http.delete(API_URLS.boards.detail('b1'), () => {
+        deleteRequests += 1
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const { wrapper } = mountHeader()
+    await settle()
+    await wrapper.find('[data-testid="delete-board"]').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[data-testid="confirm-delete-board"]')).not.toBeNull()
+
+    await queryClient.invalidateQueries({ queryKey: membersKeys.list('b1'), exact: true })
+    await settle()
+    document.querySelector<HTMLButtonElement>('[data-testid="confirm-delete-board"]')?.click()
+    await settle()
+
+    expect(memberReads).toBe(2)
+    expect(document.querySelector('[data-testid="confirm-delete-board"]')).toBeNull()
+    expect(deleteRequests).toBe(0)
   })
 
   it.each([

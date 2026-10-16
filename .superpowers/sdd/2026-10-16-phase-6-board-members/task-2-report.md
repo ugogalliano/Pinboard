@@ -49,3 +49,32 @@ Run from `apps/desktop`:
 - `npm test -- --run src/features/members/components/AddMemberDialog/AddMemberDialog.test.ts src/features/members/components/MemberList/MemberList.test.ts` — passed, 15/15 tests.
 - `npm test` — passed, 281/281 tests across 36 files.
 - No production code changed in this fix round; the diff is limited to component tests and this report.
+
+## Security-review fix — active Owner-only flows
+
+### Changes
+
+- `MemberList` now synchronously closes add/remove transient UI when the fail-closed current role stops being exactly `Owner`. Add/remove entry points, role changes, removal confirmation, and the removal dialog visibility all re-check Owner status. Role/removal also reject an `Owner` target row against current cached member data.
+- `AddMemberDialog` queries the current board role, gates its Dialog and form controls on exact Owner, closes on role loss, and checks Owner again in the submit callback before calling the add mutation.
+- `BoardHeader` closes rename/delete flows when `canManage` becomes false, gates their forms/dialogs and buttons, and checks `canManage` in rename/delete handlers before their mutations.
+- Added regression cases for invite/removal/rename/delete flows opened as Owner and then refetched as Viewer or errored. No API or backend changes.
+
+### RED / GREEN
+
+- RED: Focused tests initially exposed that rename could still PUT after an Owner-to-Viewer refetch, delete confirmation remained actionable after a role-query error, AddMemberDialog did not observe the current role, and MemberList kept its remove confirmation active after an error. One immediate-fetch status assertion in the first test draft was a timing assumption; the test now awaits query notification before asserting the pending state.
+- GREEN: Focused suites passed, 32/32 tests.
+
+### Verification
+
+Run from `apps/desktop`:
+
+- `npm test -- --run src/features/members/components/MemberList/MemberList.test.ts src/features/members/components/AddMemberDialog/AddMemberDialog.test.ts src/features/boards/components/BoardHeader/BoardHeader.test.ts` — passed, 32/32 tests.
+- `npm test` — passed, 294/294 tests across 36 files.
+- `npm run build` — passed (type-check and production build).
+- `npm run lint` — passed.
+
+### Self-review
+
+- Owner access is checked again at each mutation boundary, not just by hiding controls. Role updates and removals are refused if the target is currently an Owner row.
+- The accepted fail-closed behavior remains: every members refetch briefly removes Owner affordances; the new watchers close any open write UI during that interval.
+- No server/API changes or dependencies. Unrelated pre-existing server/docs files remain untouched and unstaged.
