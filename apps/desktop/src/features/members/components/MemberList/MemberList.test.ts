@@ -76,10 +76,69 @@ describe('MemberList', () => {
     const wrapper = mountList()
 
     expect(wrapper.find('[data-testid="members-loading"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="add-member"]').exists()).toBe(false)
     await settle()
 
     expect(wrapper.find('[data-testid="members-empty"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('No members yet')
+  })
+
+  it('hides management controls while the initial members query is pending', async () => {
+    let resolveResponse!: () => void
+    const responseGate = new Promise<void>((resolve) => {
+      resolveResponse = resolve
+    })
+    server.use(
+      http.get(MEMBERS_URL, async () => {
+        await responseGate
+        return HttpResponse.json([member('u1', 'Owner'), member('u2', 'Editor')])
+      }),
+    )
+    const wrapper = mountList()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="members-loading"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="add-member"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="role-select-u2"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="remove-member-u2"]').exists()).toBe(false)
+
+    resolveResponse()
+    await settle()
+    expect(wrapper.find('[data-testid="add-member"]').exists()).toBe(true)
+  })
+
+  it('fails closed during a failed refetch with cached Owner data', async () => {
+    const cachedMembers = [member('u1', 'Owner'), member('u2', 'Editor')]
+    queryClient.setQueryData(membersKeys.list(BOARD), cachedMembers)
+
+    let resolveResponse!: () => void
+    const responseGate = new Promise<void>((resolve) => {
+      resolveResponse = resolve
+    })
+    server.use(
+      http.get(MEMBERS_URL, async () => {
+        await responseGate
+        return HttpResponse.json({ status: 500 }, { status: 500 })
+      }),
+    )
+    const wrapper = mountList()
+    await flushPromises()
+
+    // Cached rows remain visible while the refetch is in flight, but their
+    // stale Owner role must not grant any management affordances.
+    expect(wrapper.find('[data-testid="member-u2"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="add-member"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="role-select-u2"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="remove-member-u2"]').exists()).toBe(false)
+
+    resolveResponse()
+    await settle()
+
+    expect(wrapper.find('[data-testid="members-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="add-member"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="role-select-u2"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="remove-member-u2"]').exists()).toBe(false)
+    expect(queryClient.getQueryData(membersKeys.list(BOARD))).toEqual(cachedMembers)
   })
 
   it('renders query error with a retry affordance and recovers', async () => {

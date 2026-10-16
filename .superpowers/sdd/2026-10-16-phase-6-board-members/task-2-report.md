@@ -33,3 +33,18 @@ Run from `apps/desktop`:
 - Only the exact current role `Owner` sees management actions. Every member row with role `Owner` has neither a role selector nor a remove control. Editors/Viewers can still view the route and navigate to it.
 - Add-member conflict text uses the existing safe 409 mapping and recommends checking for an existing member without asserting that the response identifies a duplicate. The caught promise leaves one toast from the mutation composable and no unhandled rejection.
 - No known concerns. Unrelated pre-existing server/docs working-tree files were left untouched and unstaged.
+
+## Reviewer fix round 1
+
+### Findings disposition
+
+1. **Email registration / VeeValidate — addressed with stronger regression assertions; no product correction needed.** Rechecked the existing design-system Input pattern in `CreateBoardDialog.vue` and `BoardHeader.vue`: `<Input name="…">` participates in the enclosing `useForm`. The existing valid-submit test already captured the precise POST payload; it now also asserts that a valid email has no validation error. The invalid-email case now verifies the exact inline `memberSchema` message (`Enter a valid email address`) and confirms that no POST is issued. No duplicate `useField('email')` state was added.
+2. **Fail-closed role controls — covered by targeted tests; no product correction needed.** `useCurrentBoardRole` returns null while pending, fetching, or errored, and `MemberList` exposes management controls only when that value is exactly `Owner`. Added coverage for the initial pending query and for a failed refetch while cached Owner/member data remains: controls stay hidden during the fetch and after failure, and the cache still contains the stale response.
+
+### Fix-round verification
+
+Run from `apps/desktop`:
+
+- `npm test -- --run src/features/members/components/AddMemberDialog/AddMemberDialog.test.ts src/features/members/components/MemberList/MemberList.test.ts` — passed, 15/15 tests.
+- `npm test` — passed, 281/281 tests across 36 files.
+- No production code changed in this fix round; the diff is limited to component tests and this report.

@@ -77,6 +77,7 @@ describe('AddMemberDialog', () => {
 
     expect(body).toEqual({ email: 'grace@example.com', role: 'Editor' })
     expect(onUpdateOpen).toHaveBeenCalledWith(false)
+    expect(document.querySelector('#add-member-email-error')).toBeNull()
   })
 
   it.each([
@@ -101,7 +102,9 @@ describe('AddMemberDialog', () => {
     expect(requestLog.filter((entry) => entry.method === 'POST')).toHaveLength(0)
     const errorSelector =
       field === 'email' ? '#add-member-email-error' : `[data-testid="add-member-${field}-error"]`
-    expect(document.querySelector(errorSelector)).not.toBeNull()
+    expect(document.querySelector(errorSelector)?.textContent).toBe(
+      field === 'email' ? 'Enter a valid email address' : 'Role must be Editor or Viewer',
+    )
   })
 
   it('shows safe actionable conflict feedback without an unhandled rejection or extra toast', async () => {
