@@ -32,6 +32,7 @@ Run from `apps/desktop`:
 - Cross-feature imports use the public `@/features/members` entry point; member components use their own composable internals.
 - Only the exact current role `Owner` sees management actions. Every member row with role `Owner` has neither a role selector nor a remove control. Editors/Viewers can still view the route and navigate to it.
 - Add-member conflict text uses the existing safe 409 mapping and recommends checking for an existing member without asserting that the response identifies a duplicate. The caught promise leaves one toast from the mutation composable and no unhandled rejection.
+- Accepted tradeoff (phase 6 ledger ruling): `useCurrentBoardRole` returns `null` during every members fetch/refetch, so Owner management controls briefly hide during the exact invalidation refetch after a member mutation. Keep this fail-closed behavior: stale Owner permissions should not remain enabled if the role refetch fails. Cost: a brief control flicker after member mutations.
 - No known concerns. Unrelated pre-existing server/docs working-tree files were left untouched and unstaged.
 
 ## Reviewer fix round 1
