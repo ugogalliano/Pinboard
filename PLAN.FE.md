@@ -526,11 +526,11 @@ Remote changes therefore appear instantly without a refetch. Use `invalidateQuer
 Same cycle for boards and members mutations (create/update/delete → invalidate the affected key).
 
 **Member mutations and `memberCount` (Phase 6 contract):** `BoardDto.memberCount` lives in the boards query data, so a membership change must refresh it through invalidation, not optimistic arithmetic.
-- **Add / remove member**: `onSettled` invalidates, all with the exact flag where stated:
-  1. `['boards', boardId, 'members']` (the exact members key)
+- **Add / remove member**: `onSettled` invalidates all three keys, each with `{ exact: true }`:
+  1. `['boards', boardId, 'members']` with `{ exact: true }` (the exact members key)
   2. `boardsKeys.all` with `{ exact: true }` (the exact `['boards']` list key)
   3. `['boards', boardId]` with `{ exact: true }` (the affected board detail key)
-- **Role update**: `onSettled` invalidates only `['boards', boardId, 'members']`. Role changes do not alter the member count, so the board keys are left untouched.
+- **Role update**: `onSettled` invalidates only `['boards', boardId, 'members']` with `{ exact: true }`. Role changes do not alter the member count, so the board keys are left untouched.
 - **No optimistic count changes**: add/remove must not write or increment `memberCount` in the `['boards']` / `['boards', boardId]` cache in `onMutate`. The count is only corrected by the refetch triggered by the invalidations above. Member mutations must not add per-board requests to refresh counts (no N+1 / member-list fanout on the boards list).
 
 ---
@@ -897,7 +897,7 @@ feat: add notes canvas
 
 Tasks:
 - implement useMembers composable (`useQuery`/`useMutation` over the members key)
-- implement the member cache contract (§8): add/remove invalidate the exact members key, `boardsKeys.all` (`exact: true`), and the affected board detail key (`exact: true`); role update invalidates only the members key. No optimistic `memberCount` changes
+- implement the member cache contract (§8): add/remove invalidate the exact members key, `boardsKeys.all` (`exact: true`), and the affected board detail key (`exact: true`); role update invalidates only the members key (`{ exact: true }` on every invalidation). No optimistic `memberCount` changes
 - build MemberList component
 - build AddMemberDialog component (VeeValidate + `memberSchema`)
 - build RoleSelect component
