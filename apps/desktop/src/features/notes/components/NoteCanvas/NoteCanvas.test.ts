@@ -668,6 +668,63 @@ describe('NoteCanvas', () => {
     )
   })
 
+  it('allows an Editor to create, edit, delete, and drag notes', async () => {
+    const { stored, postBodies, putBodies } = stubNotes([note('n1')])
+    server.use(
+      http.get(MEMBERS_URL, () =>
+        HttpResponse.json([
+          {
+            userId: 'u1',
+            email: 'a@b.co',
+            displayName: 'Ada',
+            role: 'Editor',
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+        ]),
+      ),
+    )
+
+    const { wrapper } = await mountCanvas()
+    await settle()
+    expect(wrapper.findComponent(PostItCard).props('readOnly')).toBe(false)
+
+    await dblClickCanvas(wrapper, 120, 80)
+    await wrapper.find('[data-testid="note-draft-content"]').setValue('Editor-created')
+    await wrapper.find('[data-testid="note-draft-content"]').trigger('keydown', { key: 'Enter' })
+    await settle()
+
+    expect(postBodies).toHaveLength(1)
+    expect(stored.map((item) => item.content)).toEqual(['Hello', 'Editor-created'])
+    expect(wrapper.findAllComponents(PostItCard).every((card) => card.props('readOnly') === false)).toBe(true)
+
+    await wrapper.find('[data-note-id="n1"]').trigger('dblclick')
+    await wrapper.find('[data-testid="note-editor-content"]').setValue('Editor-edited')
+    await wrapper.find('[data-testid="note-editor-content"]').trigger('keydown', { key: 'Enter' })
+    await settle()
+    expect(callsTo(API_URLS.notes.detail('n1'), 'PUT')).toHaveLength(1)
+    expect(stored[0]!.content).toBe('Editor-edited')
+
+    await wrapper.find('[data-note-id="n2"] [data-testid="post-it-card-delete"]').trigger('click')
+    await settle()
+    expect(callsTo(API_URLS.notes.detail('n2'), 'DELETE')).toHaveLength(1)
+    expect(stored.map((item) => item.id)).toEqual(['n1'])
+
+    vi.useFakeTimers()
+    const card = wrapper.find('[data-note-id="n1"]').element as HTMLElement
+    card.dispatchEvent(new MouseEvent('pointerdown', { clientX: 100, clientY: 100 }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 150, clientY: 130 }))
+    window.dispatchEvent(new MouseEvent('pointerup'))
+    await tick(300)
+
+    expect(callsTo(API_URLS.notes.detail('n1'), 'PUT')).toHaveLength(2)
+    expect(putBodies[1]).toEqual({
+      content: 'Editor-edited',
+      color: 'note-yellow',
+      positionX: 60,
+      positionY: 50,
+    })
+  })
+
   it.each(['Viewer', 'Unknown'])(
     'keeps notes read-only for a current %s role, including stale card events',
     async (role) => {
