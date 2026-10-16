@@ -206,7 +206,7 @@ RefreshRequest     { refreshToken }
 MeResponse         { id, email, displayName }
 
 // Boards
-BoardDto           { id, name, createdBy, createdAt, updatedAt }
+BoardDto           { id, name, createdBy, createdAt, updatedAt, memberCount }  // memberCount: number, required
 CreateBoardRequest { name }
 UpdateBoardRequest { name }
 
@@ -223,6 +223,8 @@ UpdateNoteRequest  { content, color, positionX, positionY }
 // Errors
 ProblemDetails     { type?, title?, status, detail?, errors? }
 ```
+
+`BoardDto.memberCount` is the total number of members on the board, **including the Owner**. It is returned by every board response: GET list (`['boards']`), GET detail (`['boards', boardId]`), POST create and PUT update. The backend computes it; the client never derives or increments it.
 
 Roles:
 - `BoardRole` = `"Owner" | "Editor" | "Viewer"`
@@ -523,6 +525,14 @@ Remote changes therefore appear instantly without a refetch. Use `invalidateQuer
 
 Same cycle for boards and members mutations (create/update/delete → invalidate the affected key).
 
+**Member mutations and `memberCount` (Phase 6 contract):** `BoardDto.memberCount` lives in the boards query data, so a membership change must refresh it through invalidation, not optimistic arithmetic.
+- **Add / remove member**: `onSettled` invalidates, all with the exact flag where stated:
+  1. `['boards', boardId, 'members']` (the exact members key)
+  2. `boardsKeys.all` with `{ exact: true }` (the exact `['boards']` list key)
+  3. `['boards', boardId]` with `{ exact: true }` (the affected board detail key)
+- **Role update**: `onSettled` invalidates only `['boards', boardId, 'members']`. Role changes do not alter the member count, so the board keys are left untouched.
+- **No optimistic count changes**: add/remove must not write or increment `memberCount` in the `['boards']` / `['boards', boardId]` cache in `onMutate`. The count is only corrected by the refetch triggered by the invalidations above. Member mutations must not add per-board requests to refresh counts (no N+1 / member-list fanout on the boards list).
+
 ---
 
 ## 12. Feature modules
@@ -540,9 +550,9 @@ Same cycle for boards and members mutations (create/update/delete → invalidate
 | Component | Responsibility |
 |-----------|---------------|
 | BoardList | Renders the `['boards']` query (isPending → spinner, empty → empty state), "Create Board" button |
-| BoardCard | Board name, created date; navigates to the board on click. Member count badge deferred to Phase 6 — `BoardDto` carries no member count |
+| BoardCard | Board name, created date, member count (`{{memberCount}} member(s)` from `BoardDto.memberCount`, read from the `['boards']` query data — no extra request); navigates to the board on click |
 | CreateBoardDialog | Modal with VeeValidate name field (`boardNameSchema`, ≤200) → create-board mutation |
-| BoardHeader | Active board title + created date, rename (Owner only), delete confirmation (Owner only). Member count badge deferred to Phase 6 |
+| BoardHeader | Active board title + created date + member count (`{{memberCount}} member(s)` from `BoardDto.memberCount`, read from the `['boards', boardId]` query data — no extra request), rename (Owner only), delete confirmation (Owner only) |
 | BoardView | Route shell for `/boards/:boardId`: renders `BoardHeader` + the routed canvas outlet (the child route is swapped for NoteCanvas in Phase 5) |
 | BoardCanvasPlaceholder | Phase 4 stand-in for the canvas. Replaced by NoteCanvas in Phase 5 (folder removed) |
 | useBoards | `useQuery(['boards'])` + mutations (create/update/delete) with invalidation |
@@ -887,6 +897,7 @@ feat: add notes canvas
 
 Tasks:
 - implement useMembers composable (`useQuery`/`useMutation` over the members key)
+- implement the member cache contract (§8): add/remove invalidate the exact members key, `boardsKeys.all` (`exact: true`), and the affected board detail key (`exact: true`); role update invalidates only the members key. No optimistic `memberCount` changes
 - build MemberList component
 - build AddMemberDialog component (VeeValidate + `memberSchema`)
 - build RoleSelect component
@@ -898,6 +909,7 @@ Acceptance criteria:
 - Owner can add a member by email
 - Owner can change member role
 - Owner can remove a member
+- board member count (BoardCard and BoardHeader) reflects add/remove after invalidation, with no optimistic count change
 - Owner cannot be removed
 - Editor sees member list (read-only)
 - Viewer sees member list (read-only)
