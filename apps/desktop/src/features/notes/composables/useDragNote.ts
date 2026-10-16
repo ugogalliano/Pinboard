@@ -59,8 +59,8 @@ export function clientToCanvas(
   scrollTop: number,
 ): CanvasPoint {
   return {
-    x: clientX - rect.left + scrollLeft,
-    y: clientY - rect.top + scrollTop,
+    x: Math.round((clientX - rect.left + scrollLeft) * 100) / 100,
+    y: Math.round((clientY - rect.top + scrollTop) * 100) / 100,
   }
 }
 

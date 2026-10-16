@@ -2,7 +2,7 @@
   <div
     data-testid="post-it-card"
     :data-note-id="note.id"
-    class="absolute w-56 cursor-grab rounded-md p-3 pb-8 shadow-md"
+    class="absolute w-56 cursor-grab rounded-md p-3 pb-8 shadow-md min-h-[150px]"
     :class="
       dragging
         ? 'z-20 cursor-grabbing touch-none select-none will-change-transform'

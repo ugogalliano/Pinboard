@@ -100,7 +100,12 @@ import { NOTE_COLOR_NAMES, type NoteColor } from '@/shared/constants/note-colors
 import type { NoteDto } from '@/shared/types/api'
 import PostItCard from '../PostItCard/PostItCard.vue'
 import PostItEditor from '../PostItEditor/PostItEditor.vue'
-import { useCreateNote, useDeleteNote, useNotesQuery, useUpdateNote } from '../../composables/useNotes'
+import {
+  useCreateNote,
+  useDeleteNote,
+  useNotesQuery,
+  useUpdateNote,
+} from '../../composables/useNotes'
 import {
   clientToCanvas,
   useDragNote,

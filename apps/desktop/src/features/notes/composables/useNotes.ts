@@ -73,8 +73,7 @@ export function useNotesQuery(boardId: MaybeRef<string | string[] | undefined>) 
 
   return useQuery({
     queryKey: computed(() => notesKeys.list(id.value ?? '')),
-    queryFn: () =>
-      apiClient<NoteDto[]>(HTTP_METHODS.GET, API_URLS.notes.list(id.value ?? '')),
+    queryFn: () => apiClient<NoteDto[]>(HTTP_METHODS.GET, API_URLS.notes.list(id.value ?? '')),
     enabled: () => id.value !== undefined,
   })
 }
