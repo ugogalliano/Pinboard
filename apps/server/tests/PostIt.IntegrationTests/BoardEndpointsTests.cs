@@ -31,6 +31,7 @@ public class BoardEndpointsTests : IClassFixture<TestWebApplicationFactory>
         Assert.NotNull(result);
         Assert.Equal("My New Board", result.Name);
         Assert.NotEqual(Guid.Empty, result.Id);
+        Assert.Equal(1, await ReadBoardMemberCountAsync(response));
     }
 
     [Fact]
@@ -72,6 +73,7 @@ public class BoardEndpointsTests : IClassFixture<TestWebApplicationFactory>
         Assert.NotNull(result);
         Assert.Single(result);
         Assert.Equal("Board A", result[0].Name);
+        Assert.Equal(1, await ReadBoardMemberCountAsync(response));
     }
 
     [Fact]
@@ -100,6 +102,7 @@ public class BoardEndpointsTests : IClassFixture<TestWebApplicationFactory>
         Assert.NotNull(result);
         Assert.Equal(created.Id, result.Id);
         Assert.Equal("Board To Get", result.Name);
+        Assert.Equal(1, await ReadBoardMemberCountAsync(response));
     }
 
     [Fact]
@@ -148,6 +151,7 @@ public class BoardEndpointsTests : IClassFixture<TestWebApplicationFactory>
         var result = await response.Content.ReadFromJsonAsync<BoardDto>();
         Assert.NotNull(result);
         Assert.Equal("New Name", result.Name);
+        Assert.Equal(1, await ReadBoardMemberCountAsync(response));
     }
 
     [Fact]
@@ -236,5 +240,15 @@ public class BoardEndpointsTests : IClassFixture<TestWebApplicationFactory>
         var registerResult = await registerResp.Content.ReadFromJsonAsync<LoginResponse>();
         Assert.NotNull(registerResult);
         return registerResult.AccessToken;
+    }
+
+    private static async Task<int> ReadBoardMemberCountAsync(HttpResponseMessage response, int boardIndex = 0)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var board = document.RootElement.ValueKind == JsonValueKind.Array
+            ? document.RootElement[boardIndex]
+            : document.RootElement;
+
+        return board.GetProperty("memberCount").GetInt32();
     }
 }

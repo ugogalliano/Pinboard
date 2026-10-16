@@ -33,19 +33,19 @@ public class BoardService : IBoardService
 
         _logger.LogInformation("Board created | boardId={BoardId}", board.Id);
 
-        return MapToDto(board);
+        return MapToDto(board, 1);
     }
 
     public async Task<IReadOnlyList<BoardDto>> GetBoardsForUserAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        var boards = await _boardRepository.GetBoardsForUserAsync(userId, cancellationToken);
-        return boards.Select(MapToDto).ToList();
+        var boards = await _boardRepository.GetBoardsWithMemberCountForUserAsync(userId, cancellationToken);
+        return boards.Select(board => MapToDto(board.Board, board.MemberCount)).ToList();
     }
 
     public async Task<BoardDto> GetBoardAsync(Guid userId, Guid boardId, CancellationToken cancellationToken = default)
     {
-        var board = await _boardRepository.GetByIdAsync(boardId, cancellationToken);
-        if (board == null)
+        var boardWithMemberCount = await _boardRepository.GetByIdWithMemberCountAsync(boardId, cancellationToken);
+        if (boardWithMemberCount == null)
         {
             throw new KeyNotFoundException($"Board with id {boardId} not found.");
         }
@@ -55,7 +55,7 @@ public class BoardService : IBoardService
             throw new UnauthorizedAccessException("You are not a member of this board.");
         }
 
-        return MapToDto(board);
+        return MapToDto(boardWithMemberCount.Board, boardWithMemberCount.MemberCount);
     }
 
     public async Task<BoardDto> UpdateBoardAsync(Guid userId, Guid boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default)
@@ -80,7 +80,8 @@ public class BoardService : IBoardService
 
         _logger.LogInformation("Board updated | boardId={BoardId}", board.Id);
 
-        return MapToDto(board);
+        var memberCount = await _boardRepository.GetMemberCountAsync(boardId, cancellationToken);
+        return MapToDto(board, memberCount);
     }
 
     public async Task DeleteBoardAsync(Guid userId, Guid boardId, CancellationToken cancellationToken = default)
@@ -115,8 +116,8 @@ public class BoardService : IBoardService
         }
     }
 
-    private static BoardDto MapToDto(Board board)
+    private static BoardDto MapToDto(Board board, int memberCount)
     {
-        return new BoardDto(board.Id, board.Name, board.CreatedBy, board.CreatedAt, board.UpdatedAt);
+        return new BoardDto(board.Id, board.Name, board.CreatedBy, board.CreatedAt, board.UpdatedAt, memberCount);
     }
 }

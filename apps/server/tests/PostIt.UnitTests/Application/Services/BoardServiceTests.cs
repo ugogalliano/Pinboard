@@ -33,6 +33,7 @@ public class BoardServiceTests
         Assert.NotNull(result);
         Assert.Equal("My Board", result.Name);
         Assert.Equal(userId, result.CreatedBy);
+        Assert.Equal(1, result.MemberCount);
         _boardRepo.Verify(r => r.AddAsync(It.IsAny<Board>(), default), Times.Once);
         _boardRepo.Verify(r => r.SaveChangesAsync(default), Times.Once);
         Assert.NotNull(capturedBoard);
@@ -68,14 +69,20 @@ public class BoardServiceTests
         var userId = Guid.NewGuid();
         var board1 = new Board("Board 1", userId);
         var board2 = new Board("Board 2", userId);
-        _boardRepo.Setup(r => r.GetBoardsForUserAsync(userId, default))
-            .ReturnsAsync(new List<Board> { board1, board2 });
+        _boardRepo.Setup(r => r.GetBoardsWithMemberCountForUserAsync(userId, default))
+            .ReturnsAsync(new List<BoardWithMemberCount>
+            {
+                new(board1, 0),
+                new(board2, 3)
+            });
 
         var result = await _svc.GetBoardsForUserAsync(userId);
 
         Assert.Equal(2, result.Count);
         Assert.Equal("Board 1", result[0].Name);
         Assert.Equal("Board 2", result[1].Name);
+        Assert.Equal(0, result[0].MemberCount);
+        Assert.Equal(3, result[1].MemberCount);
     }
 
     [Fact]
@@ -85,7 +92,8 @@ public class BoardServiceTests
         var boardId = Guid.NewGuid();
         var board = new Board("Test Board", Guid.NewGuid());
         typeof(Board).GetProperty("Id")!.SetValue(board, boardId);
-        _boardRepo.Setup(r => r.GetByIdAsync(boardId, default)).ReturnsAsync(board);
+        _boardRepo.Setup(r => r.GetByIdWithMemberCountAsync(boardId, default))
+            .ReturnsAsync(new BoardWithMemberCount(board, 0));
         _authSvc.Setup(a => a.CanReadBoardAsync(userId, boardId, default)).ReturnsAsync(true);
 
         var result = await _svc.GetBoardAsync(userId, boardId);
@@ -93,6 +101,7 @@ public class BoardServiceTests
         Assert.NotNull(result);
         Assert.Equal(boardId, result.Id);
         Assert.Equal("Test Board", result.Name);
+        Assert.Equal(0, result.MemberCount);
     }
 
     [Fact]
@@ -100,7 +109,8 @@ public class BoardServiceTests
     {
         var userId = Guid.NewGuid();
         var boardId = Guid.NewGuid();
-        _boardRepo.Setup(r => r.GetByIdAsync(boardId, default)).ReturnsAsync((Board?)null);
+        _boardRepo.Setup(r => r.GetByIdWithMemberCountAsync(boardId, default))
+            .ReturnsAsync((BoardWithMemberCount?)null);
 
         await Assert.ThrowsAsync<KeyNotFoundException>(() => _svc.GetBoardAsync(userId, boardId));
     }
@@ -112,7 +122,8 @@ public class BoardServiceTests
         var boardId = Guid.NewGuid();
         var board = new Board("Test Board", Guid.NewGuid());
         typeof(Board).GetProperty("Id")!.SetValue(board, boardId);
-        _boardRepo.Setup(r => r.GetByIdAsync(boardId, default)).ReturnsAsync(board);
+        _boardRepo.Setup(r => r.GetByIdWithMemberCountAsync(boardId, default))
+            .ReturnsAsync(new BoardWithMemberCount(board, 0));
         _authSvc.Setup(a => a.CanReadBoardAsync(userId, boardId, default)).ReturnsAsync(false);
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _svc.GetBoardAsync(userId, boardId));
@@ -127,10 +138,12 @@ public class BoardServiceTests
         typeof(Board).GetProperty("Id")!.SetValue(board, boardId);
         _boardRepo.Setup(r => r.GetByIdAsync(boardId, default)).ReturnsAsync(board);
         _authSvc.Setup(a => a.CanEditBoardAsync(userId, boardId, default)).ReturnsAsync(true);
+        _boardRepo.Setup(r => r.GetMemberCountAsync(boardId, default)).ReturnsAsync(3);
 
         var result = await _svc.UpdateBoardAsync(userId, boardId, new UpdateBoardRequest("New Name"));
 
         Assert.Equal("New Name", result.Name);
+        Assert.Equal(3, result.MemberCount);
         _boardRepo.Verify(r => r.SaveChangesAsync(default), Times.Once);
     }
 

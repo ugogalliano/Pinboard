@@ -8,4 +8,5 @@ namespace PostIt.Application.DTOs;
 /// <param name="CreatedBy">The identifier of the user who created the board.</param>
 /// <param name="CreatedAt">UTC date and time when the board was created.</param>
 /// <param name="UpdatedAt">UTC date and time when the board was last updated.</param>
-public record BoardDto(Guid Id, string Name, Guid CreatedBy, DateTime CreatedAt, DateTime UpdatedAt);
+/// <param name="MemberCount">The total number of members, including the owner.</param>
+public record BoardDto(Guid Id, string Name, Guid CreatedBy, DateTime CreatedAt, DateTime UpdatedAt, int MemberCount);

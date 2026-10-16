@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using PostIt.Application.DTOs;
 
 namespace PostIt.IntegrationTests;
@@ -86,6 +87,40 @@ public class BoardMemberEndpointsTests : IClassFixture<TestWebApplicationFactory
         Assert.Equal("add-member-target@example.com", result.Email);
         Assert.Equal("Target", result.DisplayName);
         Assert.Equal("Editor", result.Role);
+    }
+
+    [Fact]
+    public async Task BoardMemberCount_IncludesOwnerAndAddedMembers_ForListDetailAndUpdate()
+    {
+        var ownerToken = await RegisterAndLoginAsync("member-count-owner@example.com", "Password123!", "Owner");
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ownerToken);
+
+        var createResponse = await _client.PostAsJsonAsync("/api/boards", new CreateBoardRequest("Count Board"));
+        Assert.Equal(HttpStatusCode.OK, createResponse.StatusCode);
+        var created = await createResponse.Content.ReadFromJsonAsync<BoardDto>();
+        Assert.NotNull(created);
+        Assert.Equal(1, await ReadBoardMemberCountAsync(createResponse));
+
+        await RegisterAndLoginAsync("member-count-target@example.com", "Password123!", "Target");
+        var addResponse = await _client.PostAsJsonAsync(
+            $"/api/boards/{created.Id}/members",
+            new AddMemberRequest("member-count-target@example.com", "Editor"));
+        Assert.Equal(HttpStatusCode.OK, addResponse.StatusCode);
+
+        var listResponse = await _client.GetAsync("/api/boards");
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+        Assert.Equal(2, await ReadBoardMemberCountAsync(listResponse));
+
+        var detailResponse = await _client.GetAsync($"/api/boards/{created.Id}");
+        Assert.Equal(HttpStatusCode.OK, detailResponse.StatusCode);
+        Assert.Equal(2, await ReadBoardMemberCountAsync(detailResponse));
+
+        var updateResponse = await _client.PutAsJsonAsync(
+            $"/api/boards/{created.Id}",
+            new UpdateBoardRequest("Renamed Count Board"));
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+        Assert.Equal(2, await ReadBoardMemberCountAsync(updateResponse));
     }
 
     [Fact]
@@ -345,5 +380,15 @@ public class BoardMemberEndpointsTests : IClassFixture<TestWebApplicationFactory
         var registerResult = await registerResp.Content.ReadFromJsonAsync<LoginResponse>();
         Assert.NotNull(registerResult);
         return registerResult.AccessToken;
+    }
+
+    private static async Task<int> ReadBoardMemberCountAsync(HttpResponseMessage response, int boardIndex = 0)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var board = document.RootElement.ValueKind == JsonValueKind.Array
+            ? document.RootElement[boardIndex]
+            : document.RootElement;
+
+        return board.GetProperty("memberCount").GetInt32();
     }
 }

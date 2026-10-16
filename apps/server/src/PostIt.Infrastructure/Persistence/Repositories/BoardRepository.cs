@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PostIt.Application.DTOs;
 using PostIt.Application.Interfaces;
 using PostIt.Domain.Entities;
 using PostIt.Infrastructure.Persistence;
@@ -27,6 +28,31 @@ public class BoardRepository : IBoardRepository
             .Where(b => b.Members.Any(m => m.UserId == userId))
             .OrderBy(b => b.Name)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<BoardWithMemberCount?> GetByIdWithMemberCountAsync(Guid boardId, CancellationToken cancellationToken = default)
+    {
+        return await _context.Boards
+            .AsNoTracking()
+            .Where(b => b.Id == boardId)
+            .Select(b => new BoardWithMemberCount(b, b.Members.Count()))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<BoardWithMemberCount>> GetBoardsWithMemberCountForUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        return await _context.Boards
+            .AsNoTracking()
+            .Where(b => b.Members.Any(m => m.UserId == userId))
+            .OrderBy(b => b.Name)
+            .Select(b => new BoardWithMemberCount(b, b.Members.Count()))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<int> GetMemberCountAsync(Guid boardId, CancellationToken cancellationToken = default)
+    {
+        return await _context.BoardMembers
+            .CountAsync(member => member.BoardId == boardId, cancellationToken);
     }
 
     public async Task AddAsync(Board board, CancellationToken cancellationToken = default)
