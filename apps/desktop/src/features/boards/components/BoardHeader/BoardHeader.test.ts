@@ -14,7 +14,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { API_URLS } from '@/shared/constants/urls'
 import { server } from '../../../../../test/msw/server'
 import { requestLog } from '../../../../../test/msw/requests'
-import type { BoardDto } from '@/shared/types/api'
+import type { BoardDto, BoardMemberDto, BoardRole } from '@/shared/types/api'
 
 function board(overrides: Partial<BoardDto> = {}): BoardDto {
   return {
@@ -25,6 +25,16 @@ function board(overrides: Partial<BoardDto> = {}): BoardDto {
     updatedAt: '2026-02-03T00:00:00Z',
     memberCount: 1,
     ...overrides,
+  }
+}
+
+function membership(role: BoardRole): BoardMemberDto {
+  return {
+    userId: 'u1',
+    email: 'a@b.co',
+    displayName: 'Ada',
+    role,
+    createdAt: '2026-02-03T00:00:00Z',
   }
 }
 
@@ -56,11 +66,17 @@ describe('BoardHeader', () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
     useToast().clear()
+    server.use(http.get(API_URLS.members.list('b1'), () => HttpResponse.json([membership('Owner')])))
 
     router = createRouter({
       history: createMemoryHistory(),
       routes: [
         { path: '/boards/:boardId', component: { template: '<div>canvas</div>' } },
+        {
+          path: '/boards/:boardId/members',
+          name: 'board-members',
+          component: { template: '<div>members</div>' },
+        },
         { path: '/', component: { template: '<div>home</div>' } },
       ],
     })
@@ -101,6 +117,7 @@ describe('BoardHeader', () => {
     server.use(
       http.get(API_URLS.boards.list, () => HttpResponse.json([board({ createdBy: 'u2' })])),
       http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board({ createdBy: 'u2' }))),
+      http.get(API_URLS.members.list('b1'), () => HttpResponse.json([membership('Editor')])),
     )
 
     const { wrapper } = mountHeader()
@@ -109,6 +126,26 @@ describe('BoardHeader', () => {
     expect(wrapper.find('[data-testid="board-name"]').text()).toBe('Product launch')
     expect(wrapper.find('[data-testid="rename-board"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="delete-board"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="board-members-link"]').attributes('href')).toBe(
+      '/boards/b1/members',
+    )
+  })
+
+  it('uses current membership role rather than createdBy and links all board members to members', async () => {
+    server.use(
+      http.get(API_URLS.boards.list, () => HttpResponse.json([board({ createdBy: 'u2' })])),
+      http.get(API_URLS.boards.detail('b1'), () => HttpResponse.json(board({ createdBy: 'u2' }))),
+      http.get(API_URLS.members.list('b1'), () => HttpResponse.json([membership('Owner')])),
+    )
+
+    const { wrapper } = mountHeader()
+    await settle()
+
+    expect(wrapper.find('[data-testid="rename-board"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="delete-board"]').exists()).toBe(true)
+    const membersLink = wrapper.find('[data-testid="board-members-link"]')
+    expect(membersLink.exists()).toBe(true)
+    expect(membersLink.attributes('href')).toBe('/boards/b1/members')
   })
 
   it.each([

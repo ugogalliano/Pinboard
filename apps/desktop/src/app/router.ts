@@ -11,6 +11,7 @@ import BoardLayout from '@/app/layouts/BoardLayout/BoardLayout.vue'
 import { LoginForm, RegisterForm } from '@/features/auth'
 import { BoardList, BoardView } from '@/features/boards'
 import { NoteCanvas } from '@/features/notes'
+import { MemberList } from '@/features/members'
 import { useAuthStore } from '@/stores/authStore'
 
 declare module 'vue-router' {
@@ -46,6 +47,13 @@ const routes: RouteRecordRaw[] = [
             // (BoardCard and the tests link by it).
             name: 'board-canvas',
             component: NoteCanvas,
+            meta: { requiresAuth: true },
+          },
+          {
+            path: 'members',
+            name: 'board-members',
+            component: MemberList,
+            props: true,
             meta: { requiresAuth: true },
           },
         ],

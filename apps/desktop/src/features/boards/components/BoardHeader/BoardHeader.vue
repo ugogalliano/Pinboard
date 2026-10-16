@@ -66,15 +66,24 @@
           </template>
         </div>
 
-        <!-- Owner-only actions: the API rejects rename/delete for everyone
-             else (403), so they are hidden rather than disabled. -->
-        <div v-if="canManage && !renaming" class="flex items-center gap-2">
-          <Button variant="secondary" data-testid="rename-board" @click="renaming = true"
-            >Rename</Button
+        <div class="flex items-center gap-2">
+          <RouterLink
+            :to="{ name: 'board-members', params: { boardId: board.id } }"
+            data-testid="board-members-link"
+            class="rounded-md px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
           >
-          <Button variant="destructive" data-testid="delete-board" @click="deleteOpen = true">
-            Delete
-          </Button>
+            Members
+          </RouterLink>
+          <!-- Owner-only actions: the API rejects rename/delete for everyone
+               else (403), so they are hidden rather than disabled. -->
+          <div v-if="canManage && !renaming" class="flex items-center gap-2">
+            <Button variant="secondary" data-testid="rename-board" @click="renaming = true"
+              >Rename</Button
+            >
+            <Button variant="destructive" data-testid="delete-board" @click="deleteOpen = true">
+              Delete
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -124,8 +133,9 @@ import { Button, Dialog, Input, useToast } from '@ugogalliano/pm-design-system-v
 import { boardNameSchema } from '@/shared/validation/schemas'
 import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
 import Spinner from '@/shared/components/ui/Spinner/Spinner.vue'
-import { canManageBoard, useDeleteBoard, useUpdateBoard } from '../../composables/useBoards'
+import { useDeleteBoard, useUpdateBoard } from '../../composables/useBoards'
 import { useBoard } from '../../composables/useBoard'
+import { useCurrentBoardRole } from '@/features/members'
 
 const route = useRoute()
 const router = useRouter()
@@ -140,7 +150,8 @@ const {
   refetch,
 } = useBoard(computed(() => route.params.boardId))
 
-const canManage = computed(() => (board.value ? canManageBoard(board.value) : false))
+const currentRole = useCurrentBoardRole(computed(() => route.params.boardId))
+const canManage = computed(() => currentRole.value === 'Owner')
 
 // ── Rename (Owner only) ─────────────────────────────────────────────────
 const {

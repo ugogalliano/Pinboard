@@ -139,6 +139,23 @@ describe('router guard', () => {
     expect(router.currentRoute.value.query.redirect).toBe('/boards/b1')
   })
 
+  it('protects the board-members child route and keeps the named members destination', async () => {
+    const guestRouter = createAppRouter(createMemoryHistory())
+    await guestRouter.push('/boards/b1/members')
+
+    expect(guestRouter.currentRoute.value.path).toBe('/login')
+    expect(guestRouter.currentRoute.value.query.redirect).toBe('/boards/b1/members')
+
+    const auth = useAuthStore()
+    setAccessToken('access-live')
+    auth.setUser(USER)
+    const router = createAppRouter(createMemoryHistory())
+    await router.push({ name: 'board-members', params: { boardId: 'b1' } })
+
+    expect(router.currentRoute.value.path).toBe('/boards/b1/members')
+    expect(router.currentRoute.value.name).toBe('board-members')
+  })
+
   it('lets an authenticated user into / and into a board deep link', async () => {
     const auth = useAuthStore()
     // In-memory session (no refresh token) so bootstrap no-ops quickly.

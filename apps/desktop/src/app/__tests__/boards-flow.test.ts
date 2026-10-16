@@ -70,6 +70,18 @@ function stubApi(seed: BoardDto[] = []): void {
     // Phase 4 assertion surface (boards-flow owns boards, notes-flow owns
     // notes).
     http.get(API_URLS.notes.list(':boardId'), () => HttpResponse.json([])),
+    // BoardHeader also reads the current user's membership role.
+    http.get(API_URLS.members.list(':boardId'), () =>
+      HttpResponse.json([
+        {
+          userId: 'u1',
+          email: 'a@b.co',
+          displayName: 'Ada',
+          role: 'Owner',
+          createdAt: '2026-02-03T00:00:00Z',
+        },
+      ]),
+    ),
   )
 }
 
