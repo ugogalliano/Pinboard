@@ -352,6 +352,41 @@ describe('BoardSignalRService (signalr.ts)', () => {
     offNoteCreated(created)
   })
 
+  it('a stopped/replaced connection cannot dispatch into the listener registry', async () => {
+    const created = vi.fn<(note: NoteDto) => void>()
+    onNoteCreated(created)
+
+    await connectBoardHub()
+    const dying = lastConnection()
+
+    await stopBoardHub()
+    await connectBoardHub()
+
+    // Late frame from the OLD socket must be ignored (staleness guard).
+    emit(dying, 'PostItCreated', NOTE)
+    expect(created).not.toHaveBeenCalled()
+
+    offNoteCreated(created)
+  })
+
+  it('a late onclose from a replaced connection does not clobber the live state', async () => {
+    await connectBoardHub()
+    const first = lastConnection()
+
+    await stopBoardHub()
+    await connectBoardHub()
+
+    expect(boardConnectionState.value).toBe('Connected')
+
+    // The old connection's terminal close event arrives late: inert.
+    fireClose(first)
+    expect(boardConnectionState.value).toBe('Connected')
+
+    // The LIVE connection's close still drives the state.
+    fireClose(lastConnection())
+    expect(boardConnectionState.value).toBe('Disconnected')
+  })
+
   it('terminal session loss on the session bus drops the live connection', async () => {
     await connectBoardHub()
     const conn = lastConnection()

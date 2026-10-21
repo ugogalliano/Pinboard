@@ -213,8 +213,9 @@ Rules:
 - Convention: unit/component suites are colocated (`X.test.ts` next to the
   component/composable, e.g. `NoteCanvas.vue` → `NoteCanvas.test.ts`), while
   cross-cutting integration suites live in `src/app/__tests__/`.
-- Not in MVP: SignalR connection (integration only), Tauri-specific APIs,
-  visual styling.
+- Not in MVP: the real SignalR socket connection (integration/manual — Phase 7
+  unit-tests the transport in `signalr.ts` against a mocked `@microsoft/signalr`
+  client), Tauri-specific APIs, visual styling.
 
 Verification commands (run from `apps/desktop`):
 

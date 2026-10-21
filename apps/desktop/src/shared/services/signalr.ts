@@ -94,17 +94,28 @@ function buildConnection(): HubConnection {
   })
 
   // One registration per server event, dispatching to the module registry.
+  // Staleness guard: a dying/replaced connection must never dispatch into the
+  // registry after stopBoardHub()/rebuild (cross-session contamination).
   conn.on(SERVER_EVENTS.created, (note: NoteDto) => {
+    if (connection !== conn) {
+      return
+    }
     for (const listener of noteCreatedListeners) {
       listener(note)
     }
   })
   conn.on(SERVER_EVENTS.updated, (note: NoteDto) => {
+    if (connection !== conn) {
+      return
+    }
     for (const listener of noteUpdatedListeners) {
       listener(note)
     }
   })
   conn.on(SERVER_EVENTS.deleted, (noteId: string) => {
+    if (connection !== conn) {
+      return
+    }
     for (const listener of noteDeletedListeners) {
       listener(noteId)
     }
