@@ -244,8 +244,8 @@ Two projects, both xUnit.
 - **Integration tests** (`tests/PostIt.IntegrationTests`) — share
   `TestWebApplicationFactory : WebApplicationFactory<Program>` (`IClassFixture`)
   which:
-  - overrides config in-memory (`ConnectionStrings`, `JwtSettings`,
-    `DisableRateLimiting=true`);
+  - overrides config in-memory (`ConnectionStrings`, `JwtSettings`) and defaults
+    to Development, where the application disables rate limiting;
   - uses **Testcontainers PostgreSQL** when Docker is available, otherwise
     **falls back to SQLite** (`EnsureCreated`);
   - exercises real HTTP endpoints (register → login → boards → notes → SignalR)
@@ -276,9 +276,12 @@ prefer validating against the real Postgres path when Docker is available.
   recorded), revoked on logout.
 - **Passwords**: ASP.NET Core Identity `PasswordHasher<User>` (PBKDF2 + salt).
   Never implement custom hashing.
-- **Rate limiting**: `"auth"` policy — 5 requests/minute per IP on
-  `AuthController`. Globally disabled via config flag `DisableRateLimiting`
-  (used by the test factory).
+- **Rate limiting**: disabled in Development. In other environments, login and
+  registration share a 10 requests/minute per-IP bucket; refresh has a separate
+  bucket with the same limit. `/me` and logout are excluded. The `DisableRateLimiting`
+  config key is ignored, so it cannot bypass limits in Production. Client IPs
+  use the direct connection address; do not trust forwarded headers without an
+  explicit trusted-proxy allowlist.
 - **Secrets**: dev-only values live in `appsettings.Development.json` (default
   Postgres creds, dev JWT secret). Production values must come from environment
   variables / config providers — never commit real secrets.

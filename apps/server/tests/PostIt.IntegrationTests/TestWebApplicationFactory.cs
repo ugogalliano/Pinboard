@@ -14,8 +14,12 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncL
     private string _connectionString = $"DataSource=postit_test_{Guid.NewGuid()}.db";
     private bool _useFallback = true;
 
+    public string EnvironmentName { get; set; } = "Development";
+    public bool DisableRateLimiting { get; set; } = true;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.UseEnvironment(EnvironmentName);
         builder.ConfigureAppConfiguration((_, config) =>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -24,7 +28,7 @@ public class TestWebApplicationFactory : WebApplicationFactory<Program>, IAsyncL
                 ["JwtSettings:Secret"] = "test-secret-key-that-is-at-least-32-characters-long-for-hmac",
                 ["JwtSettings:Issuer"] = "PostItTest",
                 ["JwtSettings:Audience"] = "PostItTest",
-                ["DisableRateLimiting"] = "true"
+                ["DisableRateLimiting"] = DisableRateLimiting.ToString()
             });
         });
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -127,17 +128,20 @@ builder.Services.AddScoped<IBoardNotificationService, BoardNotificationService>(
 // Rate Limiting
 builder.Services.AddRateLimiter(options =>
 {
-    options.AddPolicy("auth", context =>
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = (context, _) =>
     {
-        var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        return RateLimitPartition.GetFixedWindowLimiter(ipAddress, _ => new FixedWindowRateLimiterOptions
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
         {
-            PermitLimit = 5,
-            Window = TimeSpan.FromMinutes(1),
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-            QueueLimit = 0
-        });
-    });
+            context.HttpContext.Response.Headers.RetryAfter =
+                Math.Ceiling(retryAfter.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+        }
+
+        return ValueTask.CompletedTask;
+    };
+
+    options.AddPolicy("auth-credentials", context => CreateAuthRateLimitPartition(context));
+    options.AddPolicy("auth-refresh", context => CreateAuthRateLimitPartition(context));
 });
 
 builder.Services.AddHealthChecks()
@@ -178,7 +182,7 @@ app.UseCors("LocalDevelopment");
 app.UseAuthentication();
 app.UseAuthorization();
 
-if (!app.Configuration.GetValue<bool>("DisableRateLimiting"))
+if (!app.Environment.IsDevelopment())
 {
     app.UseRateLimiter();
 }
@@ -210,5 +214,17 @@ app.MapGet("/api/ping", () => Results.Ok(new { message = "pong", timestamp = Dat
    .WithOpenApi();
 
 app.Run();
+
+static RateLimitPartition<string> CreateAuthRateLimitPartition(HttpContext context)
+{
+    var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    return RateLimitPartition.GetFixedWindowLimiter(ipAddress, _ => new FixedWindowRateLimiterOptions
+    {
+        PermitLimit = 10,
+        Window = TimeSpan.FromMinutes(1),
+        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+        QueueLimit = 0
+    });
+}
 
 public partial class Program { }
