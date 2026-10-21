@@ -40,4 +40,9 @@ export const API_URLS = {
     detail: (boardId: string, memberUserId: string) =>
       `/api/boards/${boardId}/members/${memberUserId}`,
   },
+
+  hub: {
+    /** SignalR board hub (relative URL; the Vite proxy forwards /hubs with ws:true). */
+    board: '/hubs/board',
+  },
 } as const

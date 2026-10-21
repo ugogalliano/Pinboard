@@ -13,6 +13,7 @@ import { apiClient, mapApiErrorStatus, ProfileLoadError } from '@/shared/service
 import { HTTP_METHODS } from '@/shared/constants/constants'
 import { API_URLS } from '@/shared/constants/urls'
 import { onSessionTerminated } from '@/shared/services/session'
+import { stopBoardHub } from '@/shared/services/signalr'
 import { queryClient } from '@/app/queryClient'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
 
@@ -108,6 +109,14 @@ export const useAuthStore = defineStore('auth', () => {
       }
     } catch {
       // Offline/failed logout must still clear the local session.
+    }
+    // Phase 7: drop the live SignalR board connection with the session.
+    // Best-effort — a transport failure must never reject logout (the service
+    // already swallows stop errors; the guard here is belt-and-braces).
+    try {
+      await stopBoardHub()
+    } catch {
+      // ignore
     }
     clearAuth()
     queryClient.clear()

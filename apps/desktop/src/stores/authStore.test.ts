@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@ugogalliano/pm-design-system-vue'
@@ -12,11 +12,19 @@ import {
 } from '@/shared/services/token'
 import { apiClient, ApiError, isApiError, isProfileLoadError } from '@/shared/services/api'
 import { clearSessionTerminatedHandlers } from '@/shared/services/session'
+import { stopBoardHub } from '@/shared/services/signalr'
 import { queryClient } from '@/app/queryClient'
 import { API_URLS } from '@/shared/constants/urls'
 import { server } from '../../test/msw/server'
 import { requestLog } from '../../test/msw/requests'
 import type { LoginResponse, MeResponse } from '@/shared/types/api'
+
+// Phase 7: logout stops the board hub. Mock the transport service so no real
+// SignalR client is loaded; the hub-stopping behavior itself is covered in
+// signalr.test.ts.
+vi.mock('@/shared/services/signalr', () => ({
+  stopBoardHub: vi.fn<() => Promise<void>>(async () => undefined),
+}))
 
 const TOKENS: LoginResponse = {
   accessToken: 'access-1',
@@ -110,6 +118,7 @@ describe('authStore network actions', () => {
     // the global toast store so each test observes exactly one handler/toast.
     clearSessionTerminatedHandlers()
     useToast().clear()
+    vi.mocked(stopBoardHub).mockClear()
   })
 
   it('login success stores tokens (memory + localStorage) and loads the user', async () => {
@@ -246,6 +255,31 @@ describe('authStore network actions', () => {
     expect(requestLog).toEqual([{ method: 'POST', url: API_URLS.auth.logout }])
     expect(store.isAuthenticated).toBe(false)
     expect(queryClient.getQueryData(['boards'])).toBeUndefined()
+  })
+
+  it('logout stops the SignalR board hub (Phase 7)', async () => {
+    const store = useAuthStore()
+    store.setTokens(TOKENS)
+    store.setUser(USER)
+    server.use(http.post(API_URLS.auth.logout, () => new HttpResponse(null, { status: 204 })))
+
+    await store.logout()
+
+    expect(stopBoardHub).toHaveBeenCalledTimes(1)
+    expect(store.isAuthenticated).toBe(false)
+  })
+
+  it('a rejecting stopBoardHub never fails logout (best-effort)', async () => {
+    const store = useAuthStore()
+    store.setTokens(TOKENS)
+    store.setUser(USER)
+    server.use(http.post(API_URLS.auth.logout, () => new HttpResponse(null, { status: 204 })))
+    vi.mocked(stopBoardHub).mockRejectedValueOnce(new Error('transport down'))
+
+    await expect(store.logout()).resolves.toBeUndefined()
+
+    expect(store.user).toBeNull()
+    expect(getAccessToken()).toBeNull()
   })
 
   // ── Review fixes ───────────────────────────────────────────────────────
