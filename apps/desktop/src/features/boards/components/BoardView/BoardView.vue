@@ -1,6 +1,17 @@
 <template>
   <div class="flex h-full flex-col gap-6">
-    <BoardHeader />
+    <!-- Indicator aligned right in the header row so it shows on BOTH child
+         routes (canvas and /members): the board shell lives above the outlet,
+         and app chrome (BoardLayout/Header) never learns about connection
+         state (PLAN §10). -->
+    <div class="flex items-start gap-4">
+      <div class="min-w-0 flex-1">
+        <BoardHeader />
+      </div>
+      <div class="flex h-14 shrink-0 items-center justify-end">
+        <ConnectionStatus />
+      </div>
+    </div>
     <RouterView :key="boardId" />
   </div>
 </template>
@@ -10,6 +21,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { normalizeRouteId } from '@/shared/composables/normalizeRouteId'
+import ConnectionStatus from '@/shared/components/ui/ConnectionStatus/ConnectionStatus.vue'
 import BoardHeader from '../BoardHeader/BoardHeader.vue'
 
 // Route shell for /boards/:boardId. Route SHAPE is future-proof (allowNotes):
