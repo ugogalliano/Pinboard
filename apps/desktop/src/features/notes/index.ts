@@ -13,6 +13,7 @@ export {
   type DeleteNoteValues,
   type UpdateNoteValues,
 } from './composables/useNotes'
+export { useNotesRealtime } from './composables/useNotesRealtime'
 export {
   clientToCanvas,
   useDragNote,

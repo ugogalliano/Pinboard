@@ -16,6 +16,21 @@ import { server } from '../../../../../test/msw/server'
 import { callsTo, requestLog } from '../../../../../test/msw/requests'
 import type { NoteDto } from '@/shared/types/api'
 
+// Phase 7: the canvas wires hub note events into the cache via
+// useNotesRealtime. Mock the transport so no real SignalR client is loaded;
+// the wiring behavior itself is covered in useNotesRealtime.test.ts.
+vi.mock('@/shared/services/signalr', () => ({
+  connectBoardHub: vi.fn<() => Promise<void>>(async () => {}),
+  joinBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
+  leaveBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
+  onNoteCreated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
+  offNoteCreated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
+  onNoteUpdated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
+  offNoteUpdated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
+  onNoteDeleted: vi.fn<(listener: (noteId: string) => void) => void>(),
+  offNoteDeleted: vi.fn<(listener: (noteId: string) => void) => void>(),
+}))
+
 const BOARD = 'b1'
 const LIST_URL = API_URLS.notes.list(BOARD)
 const MEMBERS_URL = API_URLS.members.list(BOARD)

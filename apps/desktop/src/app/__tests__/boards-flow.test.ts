@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { http, HttpResponse } from 'msw'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
@@ -13,6 +13,21 @@ import { API_URLS } from '@/shared/constants/urls'
 import { callsTo } from '../../../test/msw/requests'
 import { server } from '../../../test/msw/server'
 import type { BoardDto, BoardMemberDto, LoginResponse } from '@/shared/types/api'
+
+// The board route renders the real NoteCanvas, whose Phase 7 hub wiring must
+// not touch a real socket in integration tests (AGENTS §6). Cache-writing
+// behavior is unit-tested in useNotesRealtime.test.ts.
+vi.mock('@/shared/services/signalr', () => ({
+  connectBoardHub: vi.fn<() => Promise<void>>(async () => {}),
+  joinBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
+  leaveBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
+  onNoteCreated: vi.fn<(listener: (note: unknown) => void) => void>(),
+  offNoteCreated: vi.fn<(listener: (note: unknown) => void) => void>(),
+  onNoteUpdated: vi.fn<(listener: (note: unknown) => void) => void>(),
+  offNoteUpdated: vi.fn<(listener: (note: unknown) => void) => void>(),
+  onNoteDeleted: vi.fn<(listener: (noteId: unknown) => void) => void>(),
+  offNoteDeleted: vi.fn<(listener: (noteId: unknown) => void) => void>(),
+}))
 
 const TOKENS: LoginResponse = {
   accessToken: 'access-1',

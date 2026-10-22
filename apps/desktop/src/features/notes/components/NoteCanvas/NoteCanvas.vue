@@ -111,6 +111,7 @@ import {
   useNotesQuery,
   useUpdateNote,
 } from '../../composables/useNotes'
+import { useNotesRealtime } from '../../composables/useNotesRealtime'
 import {
   clientToCanvas,
   useDragNote,
@@ -141,6 +142,10 @@ const notes = computed(() => data.value ?? [])
 const { mutateAsync: createNote } = useCreateNote(boardId)
 const { mutateAsync: updateNote } = useUpdateNote(boardId)
 const { mutate: deleteNote } = useDeleteNote(boardId)
+
+// Phase 7: hub events for this board write straight into the notes cache
+// (the composable owns the mount/unmount lifecycle).
+useNotesRealtime(boardId)
 
 const { draggingId, dragOffset, pendingVisual, startDrag, onPointerMove, endDrag, cancelDrag } =
   useDragNote({ boardId })
