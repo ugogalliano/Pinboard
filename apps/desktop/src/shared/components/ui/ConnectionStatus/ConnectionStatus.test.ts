@@ -68,7 +68,7 @@ describe('ConnectionStatus', () => {
     const status = wrapper.get('[data-testid="connection-status"]')
     expect(status.attributes('role')).toBe('status')
     expect(status.text()).toBe('Reconnecting…')
-    expect(wrapper.get('[data-testid="connection-status-dot"]').classes()).toContain('bg-amber-500')
+    expect(wrapper.get('[data-testid="connection-status-dot"]').classes()).toContain('bg-warning')
   })
 
   it('hides again once the connection is restored', async () => {

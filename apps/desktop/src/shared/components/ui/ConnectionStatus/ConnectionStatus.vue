@@ -61,11 +61,11 @@ const visible = computed(() => {
 })
 
 const dotClass = computed(() => {
+  // Both variants come from the design-system semantic tokens (no raw palette
+  // classes): `warning` is the amber hue, `destructive` the app-wide red.
   switch (state.value) {
     case 'Reconnecting':
-      // No amber token in the design system, so the Tailwind palette stands in
-      // (red uses the app's existing `destructive` token).
-      return 'bg-amber-500'
+      return 'bg-warning'
     case 'Disconnected':
       return 'bg-destructive'
     default:
