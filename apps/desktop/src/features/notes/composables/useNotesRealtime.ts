@@ -103,10 +103,14 @@ export function useNotesRealtime(boardId: MaybeRef<string>): void {
   }
 
   onMounted(() => {
-    // M-1 (Task 1 review): connectBoardHub rethrows the raw transport error —
-    // never surface or log it here. The connection-state indicator (later
-    // task) shows Disconnected; a failed connect must not crash the mount.
-    void connectBoardHub().catch(() => {})
+    // M-1 (Task 1 review) / Important-2 (final review): the rejection is
+    // swallowed but leaves ONE non-user-facing trace — a fixed marker only,
+    // never the error message/token/URL (AGENTS.md §7). The transport's
+    // watchdog retries; the connection-state indicator is the user-facing
+    // affordance. A failed connect must not crash the mount.
+    void connectBoardHub().catch(() => {
+      console.debug('[notes-realtime] board hub connect failed; watchdog retries')
+    })
     // joinBoard records the board even while Connecting and the transport
     // flushes it when the connection opens (or re-opens).
     void joinBoard(id).catch(() => {})

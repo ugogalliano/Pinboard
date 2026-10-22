@@ -387,6 +387,33 @@ describe('BoardSignalRService (signalr.ts)', () => {
     expect(boardConnectionState.value).toBe('Disconnected')
   })
 
+  it('a throwing listener is isolated: later listeners still get the payload', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+    const boom = vi.fn<(note: NoteDto) => void>(() => {
+      throw new Error('listener bug')
+    })
+    const good = vi.fn<(note: NoteDto) => void>()
+    onNoteCreated(boom)
+    onNoteCreated(good)
+
+    await connectBoardHub()
+    // The dispatch must not throw into the SignalR pipeline.
+    expect(() => emit(lastConnection(), 'PostItCreated', NOTE)).not.toThrow()
+
+    expect(boom).toHaveBeenCalledTimes(1)
+    expect(good).toHaveBeenCalledWith(NOTE)
+    // Stable internal marker only — never payload/error detail (AGENTS §7).
+    expect(debugSpy).toHaveBeenCalledTimes(1)
+    for (const call of debugSpy.mock.calls) {
+      expect(JSON.stringify(call)).not.toContain('listener bug')
+      expect(JSON.stringify(call)).not.toContain('hello')
+    }
+
+    offNoteCreated(boom)
+    offNoteCreated(good)
+    debugSpy.mockRestore()
+  })
+
   it('terminal session loss on the session bus drops the live connection', async () => {
     await connectBoardHub()
     const conn = lastConnection()
@@ -412,5 +439,78 @@ describe('BoardSignalRService (signalr.ts)', () => {
     // The factory reads token.ts at call time; no token → empty string.
     clearTokens()
     expect(conn.options?.accessTokenFactory?.()).toBe('')
+  })
+
+  // ── Recovery watchdog (final Phase 7 review ruling) ───────────────────
+  describe('watchdog retry after terminal failure', () => {
+    // The ruling pins a slow (30s) single-timer retry while connect intent
+    // stands. Fake timers make the wait observable without real delays.
+    const RETRY_DELAY_MS = 30_000
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('a terminal close re-attempts after the slow delay and re-joins the pending boards', async () => {
+      await connectBoardHub()
+      const first = lastConnection()
+      await joinBoard('b1')
+
+      // Automatic reconnect exhausted → terminal onclose.
+      fireClose(first)
+      expect(boardConnectionState.value).toBe('Disconnected')
+
+      await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS)
+
+      // Watchdog called connectBoardHub(): fresh connection, joined-set
+      // flushed on open by the existing rejoin machinery.
+      expect(signalRMock.connections).toHaveLength(2)
+      expect(boardConnectionState.value).toBe('Connected')
+      expect(joinInvocations(lastConnection())).toEqual(['b1'])
+    })
+
+    it('stopBoardHub clears the intent and cancels a pending watchdog retry', async () => {
+      await connectBoardHub()
+      const first = lastConnection()
+      fireClose(first) // watchdog armed
+
+      await stopBoardHub() // intent OFF, timer cleared
+
+      await vi.advanceTimersByTimeAsync(4 * RETRY_DELAY_MS)
+      expect(signalRMock.connections).toHaveLength(1)
+      expect(boardConnectionState.value).toBe('Disconnected')
+    })
+
+    it('a failed initial start arms the watchdog and a later tick connects', async () => {
+      signalRMock.failNextStart = true
+      await expect(connectBoardHub()).rejects.toThrow('mock start failed')
+      expect(signalRMock.connections).toHaveLength(1)
+      expect(boardConnectionState.value).toBe('Disconnected')
+
+      await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS)
+
+      expect(signalRMock.connections).toHaveLength(2)
+      expect(boardConnectionState.value).toBe('Connected')
+    })
+
+    it('the online event attempts immediately and never double-schedules', async () => {
+      await connectBoardHub()
+      const first = lastConnection()
+      fireClose(first) // slow watchdog pending
+
+      window.dispatchEvent(new Event('online'))
+      await vi.advanceTimersByTimeAsync(0) // let the immediate attempt resolve
+
+      expect(signalRMock.connections).toHaveLength(2)
+      expect(boardConnectionState.value).toBe('Connected')
+
+      // The pending slow timer was cancelled: no churn after the window.
+      await vi.advanceTimersByTimeAsync(4 * RETRY_DELAY_MS)
+      expect(signalRMock.connections).toHaveLength(2)
+    })
   })
 })

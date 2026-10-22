@@ -59,6 +59,73 @@ const joinedBoards = new Set<string>()
 
 let connection: HubConnection | null = null
 
+// ── Recovery (Phase 7 whole-branch review ruling) ─────────────────────────
+// connect INTENT: on after connectBoardHub() is called, off in stopBoardHub()
+// (which session-termination/logout also call). While intent is on and the
+// transport sits in Disconnected after a TERMINAL close (the ~0/2/10/30s
+// automatic-reconnect budget exhausted) or a failed initial start(), a single
+// slow watchdog timer re-attempts the idempotent connectBoardHub(). The
+// joined-set rejoin machinery already makes the retry correct: pending boards
+// flush on every open.
+const RECONNECT_RETRY_DELAY_MS = 30_000
+
+let connectIntent = false
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleRetry(): void {
+  // Single timer: never double-schedule while one is pending.
+  if (!connectIntent || retryTimer !== null) {
+    return
+  }
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    // A failed attempt re-arms the watchdog inside connectBoardHub itself.
+    void connectBoardHub().catch(() => {
+      // Non-user-facing: the fixed-marker debug lives in connectBoardHub's
+      // failure path; transport stays UI-free.
+    })
+  }, RECONNECT_RETRY_DELAY_MS)
+}
+
+function clearRetryTimer(): void {
+  if (retryTimer !== null) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
+}
+
+// When the browser reports connectivity restored, skip the backoff wait:
+// attempt immediately and drop the pending slow timer to avoid churn. Cheap
+// non-DOM guard keeps the module importable outside a browser context.
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (!connectIntent || boardConnectionStateInternal.value !== 'Disconnected') {
+      return
+    }
+    clearRetryTimer()
+    void connectBoardHub().catch(() => {
+      // Still unreachable: connectBoardHub's failure path re-armed the timer.
+    })
+  })
+}
+
+// Stable internal marker for a failed listener dispatch — deliberately fixed
+// text only: no payload, error, token or URL (AGENTS.md §7).
+const LISTENER_FAILURE_MARKER = '[signalr] hub event listener threw; skipped'
+
+// Dispatch one hub payload to the registry with per-listener isolation: one
+// buggy consumer must not starve the others nor throw inside SignalR's
+// pipeline (the library logs it, but we own the error here instead).
+function dispatch<T>(listeners: Set<(payload: T) => void>, payload: T): void {
+  for (const listener of Array.from(listeners)) {
+    try {
+      listener(payload)
+    } catch {
+      console.debug(LISTENER_FAILURE_MARKER)
+    }
+  }
+}
+
 function buildConnection(): HubConnection {
   const conn = new HubConnectionBuilder()
     // Relative hub URL (the Vite proxy forwards /hubs with ws:true). JWT is
@@ -75,6 +142,9 @@ function buildConnection(): HubConnection {
     // dropped terminal resets the reactive state.
     if (connection === conn) {
       boardConnectionStateInternal.value = 'Disconnected'
+      // Terminal drop of the LIVE connection while intent stands: arm the
+      // slow watchdog (no-op when stopBoardHub already cleared the intent).
+      scheduleRetry()
     }
   })
 
@@ -100,25 +170,19 @@ function buildConnection(): HubConnection {
     if (connection !== conn) {
       return
     }
-    for (const listener of noteCreatedListeners) {
-      listener(note)
-    }
+    dispatch(noteCreatedListeners, note)
   })
   conn.on(SERVER_EVENTS.updated, (note: NoteDto) => {
     if (connection !== conn) {
       return
     }
-    for (const listener of noteUpdatedListeners) {
-      listener(note)
-    }
+    dispatch(noteUpdatedListeners, note)
   })
   conn.on(SERVER_EVENTS.deleted, (noteId: string) => {
     if (connection !== conn) {
       return
     }
-    for (const listener of noteDeletedListeners) {
-      listener(noteId)
-    }
+    dispatch(noteDeletedListeners, noteId)
   })
 
   return conn
@@ -137,8 +201,12 @@ function rejoinAll(conn: HubConnection): void {
  * Starts the board hub. Idempotent: no-op while Connecting/Connected/
  * Reconnecting; rebuilds and starts only from Disconnected. A failed start
  * leaves state consistent (Disconnected) and rethrows — never swallowed.
+ * Calling this raises the connect INTENT: terminal failures then keep
+ * re-attempting on the slow watchdog timer until stopBoardHub() clears it.
  */
 export async function connectBoardHub(): Promise<void> {
+  connectIntent = true
+
   if (boardConnectionStateInternal.value !== 'Disconnected') {
     return
   }
@@ -153,6 +221,9 @@ export async function connectBoardHub(): Promise<void> {
     if (connection === conn) {
       connection = null
       boardConnectionStateInternal.value = 'Disconnected'
+      // Failed initial start: arm the watchdog so a longer outage recovers
+      // without waiting for a new mount.
+      scheduleRetry()
     }
     throw error
   }
@@ -161,6 +232,8 @@ export async function connectBoardHub(): Promise<void> {
   // has no onconnected callback); stop() during the await discards this one.
   if (connection === conn) {
     boardConnectionStateInternal.value = 'Connected'
+    // Open again: the watchdog is no longer needed.
+    clearRetryTimer()
     // Flush boards joined before the connection opened (same rejoin rule).
     rejoinAll(conn)
   }
@@ -197,6 +270,10 @@ export async function leaveBoard(boardId: string): Promise<void> {
  */
 export async function stopBoardHub(): Promise<void> {
   const conn = connection
+  // Explicit stop ends the connect intent: the watchdog must not resurrect
+  // the connection after logout / session teardown.
+  connectIntent = false
+  clearRetryTimer()
   // Drop the reference FIRST: late lifecycle events from the old connection
   // are then ignored by the handlers above.
   connection = null

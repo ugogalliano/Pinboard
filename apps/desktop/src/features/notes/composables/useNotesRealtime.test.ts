@@ -95,6 +95,27 @@ describe('useNotesRealtime', () => {
     expect(hub.onNoteDeleted).toHaveBeenCalledTimes(1)
   })
 
+  it('a rejected connect leaves one fixed debug trace and never crashes the mount', async () => {
+    // Important-2 (final review): the swallowed rejection must still leave a
+    // non-user-facing trace — a FIXED marker, never the raw error (which may
+    // carry URLs/tokens; AGENTS §7).
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+    hub.connectBoardHub.mockRejectedValueOnce(
+      new Error('failed /hubs/board?access_token=SECRET-TOKEN'),
+    )
+
+    mountComposable(BOARD)
+    await vi.waitFor(() => expect(debugSpy).toHaveBeenCalledTimes(1))
+
+    const logged = JSON.stringify(debugSpy.mock.calls)
+    expect(logged).not.toContain('SECRET-TOKEN')
+    expect(logged).not.toContain('access_token')
+    // The mount completed its remaining work despite the failed connect.
+    expect(hub.joinBoard).toHaveBeenCalledWith(BOARD)
+
+    debugSpy.mockRestore()
+  })
+
   it('leaves and unregisters handlers on unmount, keeping the connection alive', () => {
     const wrapper = mountComposable(BOARD)
     const created = createdCb()
