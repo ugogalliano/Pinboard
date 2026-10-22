@@ -15,6 +15,10 @@ const hub = vi.hoisted(() => ({
   joinBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
   leaveBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
   stopBoardHub: vi.fn<() => Promise<void>>(async () => {}),
+  // Ref stand-in: every consumer of this export only READS `.value`; keeping
+  // it in the factory prevents future assertions from crashing on a missing
+  // mock export (authStore / useSignalR share this module path).
+  boardConnectionState: { value: 'Disconnected' },
   onNoteCreated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
   offNoteCreated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
   onNoteUpdated: vi.fn<(listener: (note: NoteDto) => void) => void>(),

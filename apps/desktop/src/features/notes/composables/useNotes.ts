@@ -128,11 +128,22 @@ export function useCreateNote(boardId: MaybeRef<string>) {
       }
       // Idempotent swap: replace the temp entry captured in onMutate — or,
       // if a refetch already landed the real note (temp gone), append it
-      // ONLY when its id is still absent. A duplicate is never possible.
+      // ONLY when its id is still absent.
       if (notes.some((item) => item.id === context?.tempId)) {
+        const swapped = notes.map((item) => (item.id === context?.tempId ? created : item))
+        // Echo race (IMPORTANT-2): a hub PostItCreated for this very note may
+        // have appended the real DTO while the temp was still in cache, so
+        // the swap above can leave TWO entries sharing `created.id`. Keep
+        // exactly one (the first occurrence) — deterministic, id-only.
+        let seen = false
         queryClient.setQueryData(
           key,
-          notes.map((item) => (item.id === context?.tempId ? created : item)),
+          swapped.filter((item) => {
+            if (item.id !== created.id) return true
+            if (seen) return false
+            seen = true
+            return true
+          }),
         )
       } else if (!notes.some((item) => item.id === created.id)) {
         queryClient.setQueryData(key, [...notes, created])

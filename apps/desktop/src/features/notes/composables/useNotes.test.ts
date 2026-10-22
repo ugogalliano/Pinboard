@@ -13,12 +13,42 @@ import {
   useNotesQuery,
   useUpdateNote,
 } from './useNotes'
+import { useNotesRealtime } from './useNotesRealtime'
 import { useAuthStore } from '@/stores/authStore'
 import { API_URLS } from '@/shared/constants/urls'
 import { clearTokens } from '@/shared/services/token'
 import { server } from '../../../../test/msw/server'
 import { callsTo, requestLog } from '../../../../test/msw/requests'
 import type { LoginResponse, NoteDto, UpdateNoteRequest } from '@/shared/types/api'
+
+// The transport is mocked (AGENTS §6): the echo-race test mounts the real
+// useNotesRealtime composable and captures its hub callbacks, while every
+// other suite in this file never touches the socket.
+const hub = vi.hoisted(() => ({
+  connectBoardHub: vi.fn<() => Promise<void>>(async () => {}),
+  joinBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
+  leaveBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
+  stopBoardHub: vi.fn<() => Promise<void>>(async () => {}),
+  boardConnectionState: { value: 'Disconnected' },
+  onNoteCreated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
+  offNoteCreated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
+  onNoteUpdated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
+  offNoteUpdated: vi.fn<(listener: (note: NoteDto) => void) => void>(),
+  onNoteDeleted: vi.fn<(listener: (noteId: string) => void) => void>(),
+  offNoteDeleted: vi.fn<(listener: (noteId: string) => void) => void>(),
+}))
+vi.mock('@/shared/services/signalr', () => hub)
+
+/** Mount useNotesRealtime and return the created-callback it registered. */
+function mountRealtime(pinia: ReturnType<typeof createPinia>, client: QueryClient): void {
+  const Harness = defineComponent({
+    setup() {
+      useNotesRealtime(BOARD)
+      return () => h('div')
+    },
+  })
+  mount(Harness, { global: { plugins: [pinia, [VueQueryPlugin, { queryClient: client }]] } })
+}
 
 const BOARD = 'b1'
 const LIST_URL = API_URLS.notes.list(BOARD)
@@ -388,6 +418,50 @@ describe('useCreateNote', () => {
     expect(after[0]).toBe(n1)
     expect(after[1]).toBe(n2)
     expect(after[2]).toMatchObject({ id: 'n9', content: 'Draft' })
+  })
+
+  it('collapses the temp swap into ONE entry when a hub echo lands mid-flight', async () => {
+    // IMPORTANT-2 regression: PostItCreated for the user's OWN note arrives
+    // BEFORE the create POST answers. The realtime handler appends the real
+    // DTO while the temp entry is still cached, so onSuccess must replace the
+    // temp AND drop the echo duplicate — exactly one entry with the real id.
+    let releasePost!: (res: Response) => void
+    server.use(
+      http.post(LIST_URL, () => {
+        return new Promise<Response>((resolve) => {
+          releasePost = resolve
+        })
+      }),
+    )
+
+    const { create } = mountMutations(pinia, queryClient)
+    mountRealtime(pinia, queryClient)
+    const createdCb = hub.onNoteCreated.mock.calls[hub.onNoteCreated.mock.calls.length - 1]![0]!
+    const created = note('n9', { content: 'Draft', color: 'note-blue', positionX: 1, positionY: 1 })
+
+    const n1 = note('n1')
+    queryClient.setQueryData(notesKeys.list(BOARD), [n1])
+
+    create.mutate({ content: 'Draft', color: 'note-blue', positionX: 1, positionY: 1 })
+    await settle()
+
+    // In flight: [n1, temp-…] — the echo arrives BEFORE the POST answers.
+    expect(cachedNotes(queryClient)[1]!.id.startsWith('temp-')).toBe(true)
+    createdCb(created)
+    const withEcho = cachedNotes(queryClient)
+    expect(withEcho).toHaveLength(3) // n1 + temp + echoed n9
+    expect(withEcho[0]).toBe(n1)
+    expect(withEcho[2]!.id).toBe('n9')
+
+    releasePost(HttpResponse.json(created))
+    await settle()
+
+    // No live observer: onSettled invalidation cannot refetch, so what rides
+    // in the cache is EXACTLY what onSuccess wrote. One n9, no temp residue.
+    const after = cachedNotes(queryClient)
+    expect(after.filter((item) => item.id === 'n9')).toHaveLength(1)
+    expect(after.some((item) => item.id.startsWith('temp-'))).toBe(false)
+    expect(after.map((item) => item.id)).toEqual(['n1', 'n9'])
   })
 
   it('drops the optimistically seeded list on a failed first create — no temp survives', async () => {

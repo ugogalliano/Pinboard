@@ -7,6 +7,7 @@ import { createMemoryHistory, type Router } from 'vue-router'
 import App from '@/app/App/App.vue'
 import { createAppRouter } from '@/app/router'
 import { boardsKeys } from '@/features/boards'
+import { joinBoard, leaveBoard } from '@/shared/services/signalr'
 import { useAuthStore } from '@/stores/authStore'
 import { clearTokens } from '@/shared/services/token'
 import { API_URLS } from '@/shared/constants/urls'
@@ -21,6 +22,8 @@ vi.mock('@/shared/services/signalr', () => ({
   connectBoardHub: vi.fn<() => Promise<void>>(async () => {}),
   joinBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
   leaveBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
+  stopBoardHub: vi.fn<() => Promise<void>>(async () => {}),
+  boardConnectionState: { value: 'Disconnected' },
   onNoteCreated: vi.fn<(listener: (note: unknown) => void) => void>(),
   offNoteCreated: vi.fn<(listener: (note: unknown) => void) => void>(),
   onNoteUpdated: vi.fn<(listener: (note: unknown) => void) => void>(),
@@ -182,6 +185,52 @@ describe('boards flow (integration)', () => {
     expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b2'))?.name).toBe('Team offsite')
     expect(wrapper.find('[data-testid="board-name"]').text()).toBe('Team offsite')
     expect(wrapper.find('[data-testid="note-canvas"]').exists()).toBe(true)
+  })
+
+  it('re-joins the hub on a board switch: the keyed outlet remounts the canvas', async () => {
+    // CRITICAL-1 regression: Vue Router reuses the canvas component instance
+    // when only the :boardId param changes. BoardView keys its outlet on the
+    // normalized boardId so the mount-time hub lifecycle (useNotesRealtime)
+    // leaves the old board and joins the new one.
+    signIn()
+    stubApi([makeBoard('b1', 'Product launch'), makeBoard('b2', 'Team offsite')])
+
+    const { wrapper, router } = await mountApp()
+    await settle()
+
+    // Other tests in this file share the module-level mocks: start clean.
+    vi.mocked(joinBoard).mockClear()
+    vi.mocked(leaveBoard).mockClear()
+
+    await router.push('/boards/b1')
+    await settle()
+    expect(vi.mocked(joinBoard)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(joinBoard)).toHaveBeenCalledWith('b1')
+    expect(vi.mocked(leaveBoard)).not.toHaveBeenCalled()
+
+    await router.push('/boards/b2')
+    await settle()
+    // Unmount (leave OLD) then mount (join NEW) — not the reuse path.
+    expect(vi.mocked(leaveBoard)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(leaveBoard)).toHaveBeenCalledWith('b1')
+    expect(vi.mocked(joinBoard)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(joinBoard)).toHaveBeenCalledWith('b2')
+    expect(wrapper.find('[data-testid="note-canvas"]').exists()).toBe(true)
+
+    // Board-scoped key, NOT path-scoped: a query-only navigation stays on the
+    // same board/canvas route — the instance must survive without churn.
+    await router.push('/boards/b2?echo=1')
+    await settle()
+    expect(vi.mocked(joinBoard)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(leaveBoard)).toHaveBeenCalledTimes(1)
+
+    // Canvas→members on the SAME board: the component swap unmounts the
+    // canvas (normal lifecycle); the members screen never joins the hub.
+    await router.push('/boards/b2/members')
+    await settle()
+    expect(vi.mocked(leaveBoard)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(leaveBoard)).toHaveBeenLastCalledWith('b2')
+    expect(vi.mocked(joinBoard)).toHaveBeenCalledTimes(2)
   })
 
   it('refreshes authoritative member counts after add/remove, not during role updates', async () => {

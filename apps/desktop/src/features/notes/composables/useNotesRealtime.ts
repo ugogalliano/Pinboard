@@ -31,8 +31,10 @@ import { notesKeys } from './useNotes'
 // ignored — never throw into the SignalR dispatch loop.
 
 /** Runtime guard for a hub note payload: usable id, and scoped to this board. */
-function isNoteForBoard(note: NoteDto, boardId: string): boolean {
-  return !!note && typeof note.id === 'string' && note.id !== '' && note.boardId === boardId
+function isNoteForBoard(note: unknown, boardId: string): note is NoteDto {
+  if (!note || typeof note !== 'object') return false
+  const candidate = note as Partial<NoteDto>
+  return typeof candidate.id === 'string' && candidate.id !== '' && candidate.boardId === boardId
 }
 
 /**

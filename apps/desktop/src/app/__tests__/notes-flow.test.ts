@@ -21,6 +21,8 @@ vi.mock('@/shared/services/signalr', () => ({
   connectBoardHub: vi.fn<() => Promise<void>>(async () => {}),
   joinBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
   leaveBoard: vi.fn<(boardId: string) => Promise<void>>(async () => {}),
+  stopBoardHub: vi.fn<() => Promise<void>>(async () => {}),
+  boardConnectionState: { value: 'Disconnected' },
   onNoteCreated: vi.fn<(listener: (note: unknown) => void) => void>(),
   offNoteCreated: vi.fn<(listener: (note: unknown) => void) => void>(),
   onNoteUpdated: vi.fn<(listener: (note: unknown) => void) => void>(),
