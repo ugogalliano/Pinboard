@@ -43,7 +43,8 @@ Key mechanics:
 - **Validation**: VeeValidate + Zod. Schemas in `shared/validation/schemas.ts`
   are the single source of truth, mirroring backend limits (board name ≤200,
   note content ≤1000, note color ≤50, role ∈ {Editor, Viewer}) — see §4.
-- **Realtime**: `BoardSignalRService` in `shared/services/signalr.ts`;
+- **Realtime**: the board-hub transport ships as a module of functions
+  (`BoardSignalRService`'s shape in `shared/services/signalr.ts`);
   events write straight into the query cache (`setQueryData`), mutations are
   optimistic with rollback + error toast on failure.
 - **Routing**: Vue Router with a global `router.beforeEach` guard

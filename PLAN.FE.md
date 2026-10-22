@@ -156,12 +156,12 @@ apps/desktop/
 │   │   │   └── note-colors.ts   # sticky-note palette
 │   │   ├── composables/
 │   │   │   └── useDebounce.ts
-│   │   │   # useSignalR.ts deferred (Phase 7 realtime)
+│   │   │   # useSignalR.ts shipped (Phase 7 realtime) — thin readonly accessor
 │   │   ├── services/
 │   │   │   ├── api.ts
 │   │   │   ├── session.ts
 │   │   │   └── token.ts
-│   │   │   # signalr.ts deferred (Phase 7 realtime)
+│   │   │   # signalr.ts shipped (Phase 7 realtime) — as a module of functions, not a class
 │   │   ├── validation/
 │   │   │   └── schemas.ts        # Zod schemas (shared with VeeValidate)
 │   │   └── types/
@@ -495,7 +495,7 @@ On board canvas mount (`onMounted`):
 2. joinBoard(boardId)
 3. Register event handlers
 
-On board canvas unmount (`onUnmounted`):
+On board canvas unmount (`onBeforeUnmount`):
 1. leaveBoard(boardId)
 2. Unregister handlers
 3. Keep connection alive (don't stop)
