@@ -21,19 +21,19 @@ public class BoardNotificationService : IBoardNotificationService
     public async Task PostItCreated(Guid boardId, NoteDto note, CancellationToken cancellationToken = default)
     {
         await SendAsync(boardId, "PostItCreated",
-            () => _hubContext.Clients.Group(boardId.ToString()).SendAsync("PostItCreated", note, cancellationToken));
+            () => _hubContext.Clients.Group(BoardGroup.Name(boardId)).SendAsync("PostItCreated", note, cancellationToken));
     }
 
     public async Task PostItUpdated(Guid boardId, NoteDto note, CancellationToken cancellationToken = default)
     {
         await SendAsync(boardId, "PostItUpdated",
-            () => _hubContext.Clients.Group(boardId.ToString()).SendAsync("PostItUpdated", note, cancellationToken));
+            () => _hubContext.Clients.Group(BoardGroup.Name(boardId)).SendAsync("PostItUpdated", note, cancellationToken));
     }
 
     public async Task PostItDeleted(Guid boardId, Guid noteId, CancellationToken cancellationToken = default)
     {
         await SendAsync(boardId, "PostItDeleted",
-            () => _hubContext.Clients.Group(boardId.ToString()).SendAsync("PostItDeleted", noteId, cancellationToken));
+            () => _hubContext.Clients.Group(BoardGroup.Name(boardId)).SendAsync("PostItDeleted", noteId, cancellationToken));
     }
 
     private async Task SendAsync(Guid boardId, string eventName, Func<Task> send)

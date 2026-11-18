@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using PostIt.Application.DTOs;
 
@@ -133,6 +134,55 @@ public class SignalRTests : IClassFixture<TestWebApplicationFactory>
         var result = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(created.Id, result);
 
+        await connection.StopAsync();
+    }
+
+    [Fact]
+    public async Task JoinBoard_NonMember_ThrowsHubException()
+    {
+        var ownerToken = await RegisterAndLoginAsync("signalr-priv-owner@example.com", "Password123!", "Priv Owner");
+        var board = await CreateBoardAsync(ownerToken, "Private SignalR Board");
+
+        var otherToken = await RegisterAndLoginAsync("signalr-priv-other@example.com", "Password123!", "Priv Other");
+        var connection = CreateHubConnection(otherToken);
+
+        var tcs = new TaskCompletionSource<NoteDto>();
+        connection.On<NoteDto>("PostItCreated", note => tcs.TrySetResult(note));
+
+        await connection.StartAsync();
+
+        var ex = await Assert.ThrowsAsync<HubException>(() => connection.InvokeAsync("JoinBoard", board.Id));
+        Assert.Contains("not a member", ex.Message);
+
+        // The owner creates a note; the rejected connection must not receive it.
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ownerToken);
+        var response = await _client.PostAsJsonAsync($"/api/boards/{board.Id}/notes", new CreateNoteRequest("Private note", "yellow", 1, 2));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // Broadcast delivery is normally sub-second in this harness; if it has not
+        // arrived within 5 seconds the rejected connection is not in the group.
+        await Assert.ThrowsAsync<TimeoutException>(
+            () => tcs.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        await connection.StopAsync();
+    }
+
+    [Fact]
+    public async Task LeaveBoard_NonMember_Succeeds()
+    {
+        var ownerToken = await RegisterAndLoginAsync("signalr-leave-owner@example.com", "Password123!", "Leave Owner");
+        var board = await CreateBoardAsync(ownerToken, "Leave SignalR Board");
+
+        var otherToken = await RegisterAndLoginAsync("signalr-leave-other@example.com", "Password123!", "Leave Other");
+        var connection = CreateHubConnection(otherToken);
+
+        await connection.StartAsync();
+
+        // Leaving a group requires no membership: must not throw.
+        await connection.InvokeAsync("LeaveBoard", board.Id);
+
+        Assert.Equal(HubConnectionState.Connected, connection.State);
         await connection.StopAsync();
     }
 
