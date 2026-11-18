@@ -108,7 +108,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Button, Dialog } from '@ugogalliano/pm-design-system-vue'
+import { Button, Dialog, useToast } from '@ugogalliano/pm-design-system-vue'
 
 import Spinner from '@/shared/components/ui/Spinner/Spinner.vue'
 import type { BoardMemberDto, AssignableRole } from '@/shared/types/api'
@@ -123,6 +123,7 @@ import RoleSelect from '../RoleSelect/RoleSelect.vue'
 
 const props = defineProps<{ boardId: string }>()
 
+const { toast } = useToast()
 const boardId = computed(() => props.boardId)
 const { data, isPending, isError, isFetching, refetch } = useMembersQuery(boardId)
 const currentRole = useCurrentBoardRole(boardId)
@@ -138,10 +139,17 @@ const isRemovalAllowed = computed(() => {
 const { mutateAsync: updateMember, isPending: isUpdating } = useUpdateMember(boardId)
 const { mutateAsync: removeMember, isPending: isRemoving } = useRemoveMember(boardId)
 
+// Ownership-loss teardown with SETTLED semantics (composed with
+// AddMemberDialog's inline server-field errors): a transient `null` from
+// useCurrentBoardRole while the mutation's `onSettled` invalidation refetches
+// the members list must NOT close the add dialog — that blip lands exactly
+// when the user needs to fix the inline email error and retry. Act only on a
+// SETTLED non-Owner role, or when the role source ENDED in error (fail-closed
+// like before: a failed refetch cannot vouch for ownership either).
 watch(
-  isOwner,
-  (owner) => {
-    if (owner) return
+  [currentRole, isError],
+  ([role, failed]) => {
+    if (role === 'Owner' || (role === null && !failed)) return
     addOpen.value = false
     selectedForRemoval.value = null
   },
@@ -185,6 +193,9 @@ async function confirmRemove(): Promise<void> {
   }
   try {
     await removeMember(currentMember.userId)
+    // Success toast (§13 "Success toasts"): a removed row is subtle — the
+    // list shrinking in place is not dependable feedback.
+    toast({ variant: 'success', message: 'Member removed' })
     selectedForRemoval.value = null
   } catch {
     // Rollback and the single safe error toast live in the mutation composable.

@@ -89,6 +89,101 @@ describe('AddMemberDialog', () => {
     expect(body).toEqual({ email: 'grace@example.com', role: 'Editor' })
     expect(onUpdateOpen).toHaveBeenCalledWith(false)
     expect(document.querySelector('#add-member-email-error')).toBeNull()
+    // Success toast (§13): exactly ONE success toast 'Member added'.
+    const toasts = useToast().toasts.value
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.variant).toBe('success')
+    expect(toasts[0]!.message).toBe('Member added')
+  })
+
+  it('maps a 400 errors dict to the inline email field error and keeps the dialog open', async () => {
+    server.use(
+      http.get(MEMBERS_URL, () => HttpResponse.json([membership('Owner')])),
+      http.post(MEMBERS_URL, () =>
+        HttpResponse.json(
+          {
+            status: 400,
+            title: 'One or more validation errors occurred.',
+            errors: { Email: ['Email is not valid'] },
+          },
+          { status: 400 },
+        ),
+      ),
+    )
+    const onUpdateOpen = vi.fn<(value: boolean) => void>()
+    mountDialog(true, onUpdateOpen)
+    await settle()
+
+    const email = document.querySelector<HTMLInputElement>('#add-member-email')!
+    email.value = 'grace@example.com'
+    email.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    document.querySelector<HTMLButtonElement>('[data-testid="add-member-submit"]')!.click()
+    await settle()
+
+    // The server's PascalCase 'Email' key resolves to the camelCase field.
+    expect(document.querySelector('#add-member-email-error')?.textContent).toContain(
+      'Email is not valid',
+    )
+    // Dict beats detail precedence: no form-level alert was needed here.
+    expect(document.querySelector('[data-testid="add-member-error"]')).toBeNull()
+    // Dialog STAYS OPEN and no success toast fires.
+    expect(onUpdateOpen).not.toHaveBeenCalledWith(false)
+    expect(document.querySelector('#add-member-email')).not.toBeNull()
+    const toasts = useToast().toasts.value
+    expect(toasts.some((t) => t.variant === 'success')).toBe(false)
+    // Exactly the composable's one error toast — not doubled by the dialog.
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.variant).toBe('error')
+  })
+
+  it('maps a dict-less 400 detail to the form-level message', async () => {
+    server.use(
+      http.get(MEMBERS_URL, () => HttpResponse.json([membership('Owner')])),
+      http.post(MEMBERS_URL, () =>
+        HttpResponse.json({ status: 400, detail: 'role not assignable' }, { status: 400 }),
+      ),
+    )
+    mountDialog()
+    await settle()
+
+    const email = document.querySelector<HTMLInputElement>('#add-member-email')!
+    email.value = 'grace@example.com'
+    email.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    document.querySelector<HTMLButtonElement>('[data-testid="add-member-submit"]')!.click()
+    await settle()
+
+    expect(document.querySelector('[data-testid="add-member-error"]')?.textContent).toBe(
+      'Invalid input: role not assignable',
+    )
+    expect(useToast().toasts.value.some((t) => t.variant === 'success')).toBe(false)
+  })
+
+  it('maps an unknown-email 404 to an email-field error (dialog stays open, no success toast)', async () => {
+    server.use(
+      http.get(MEMBERS_URL, () => HttpResponse.json([membership('Owner')])),
+      http.post(MEMBERS_URL, () => HttpResponse.json({ status: 404 }, { status: 404 })),
+    )
+    const onUpdateOpen = vi.fn<(value: boolean) => void>()
+    mountDialog(true, onUpdateOpen)
+    await settle()
+
+    const email = document.querySelector<HTMLInputElement>('#add-member-email')!
+    email.value = 'ghost@example.com'
+    email.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    document.querySelector<HTMLButtonElement>('[data-testid="add-member-submit"]')!.click()
+    await settle()
+
+    expect(document.querySelector('#add-member-email-error')?.textContent).toContain(
+      'No account with this email exists',
+    )
+    expect(onUpdateOpen).not.toHaveBeenCalledWith(false)
+    const toasts = useToast().toasts.value
+    expect(toasts.some((t) => t.variant === 'success')).toBe(false)
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.variant).toBe('error')
   })
 
   it.each([

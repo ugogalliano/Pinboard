@@ -80,11 +80,14 @@ export function mapApiErrorToMessage(error: unknown): string {
 }
 
 /**
- * Maps an ASP.NET ProblemDetails `errors` dictionary (PascalCase or dotted
- * keys like "Email"/"RegisterRequest.Email") to a VeeValidate field-error
- * record keyed by the lowercased final field name. Non-string/empty entries
- * are dropped so nothing unsafe reaches the form. A problem without an
- * errors dict maps to an empty record.
+ * Maps an ASP.NET ProblemDetails `errors` dictionary (PascalCase, dotted
+ * like "RegisterRequest.DisplayName", or JSON-pointer like
+ * "$.positionX") to a VeeValidate field-error record. The final path
+ * segment resolves to a camelCase field name by lowercasing ONLY its first
+ * character — so "DisplayName" → "displayName" (matching the DTO/camelCase
+ * wire fields) while an already-camel "displayName" survives untouched.
+ * Non-string/empty entries are dropped so nothing unsafe reaches the form.
+ * A problem without an errors dict maps to an empty record.
  */
 export function mapProblemErrors(problem: ProblemDetails): Record<string, string> {
   const mapped: Record<string, string> = {}
@@ -93,7 +96,8 @@ export function mapProblemErrors(problem: ProblemDetails): Record<string, string
     return mapped
   }
   for (const [key, messages] of Object.entries(errors)) {
-    const field = key.toLowerCase().split('.').pop()
+    const segment = key.split('.').pop() ?? ''
+    const field = segment.charAt(0).toLowerCase() + segment.slice(1)
     const message = Array.isArray(messages) ? messages[0] : undefined
     if (field && message) {
       mapped[field] = message

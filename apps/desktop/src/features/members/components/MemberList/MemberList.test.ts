@@ -299,6 +299,11 @@ describe('MemberList', () => {
     expect(queryClient.getQueryData<BoardMemberDto[]>(membersKeys.list(BOARD))).toEqual([
       member('u1', 'Owner'),
     ])
+    // Success toast (§13): exactly ONE success toast 'Member removed'.
+    const toasts = useToast().toasts.value
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.variant).toBe('success')
+    expect(toasts[0]!.message).toBe('Member removed')
   })
 
   it('catches a failed remove mutation without an unhandled rejection or duplicate toast', async () => {
@@ -324,6 +329,63 @@ describe('MemberList', () => {
     expect(useToast().toasts.value[0]?.message).toBe("You don't have permission for this action")
     expect(wrapper.find('[data-testid="member-u2"]').exists()).toBe(true)
     window.removeEventListener('unhandledrejection', onUnhandled)
+  })
+
+  it('composed add flow: a failed invite keeps the dialog open with the inline email error, and only a settled ownership loss closes it', async () => {
+    // Regression (reviewer MUST-FIX 1): MemberList owns `v-model:open`, and
+    // the mutation's onSettled invalidation refetches the members list after
+    // EVERY add attempt — useCurrentBoardRole is transiently null during
+    // that window. The parent must not read that blip as ownership loss
+    // (closing the dialog exactly when the inline field error should be
+    // actionable); a SETTLED non-Owner role must still close it.
+    let memberReads = 0
+    server.use(
+      http.get(MEMBERS_URL, () => {
+        memberReads += 1
+        return HttpResponse.json([
+          member('u1', memberReads <= 2 ? 'Owner' : 'Viewer'),
+          member('u2', 'Editor'),
+        ])
+      }),
+      http.post(MEMBERS_URL, () =>
+        HttpResponse.json(
+          {
+            status: 400,
+            title: 'One or more validation errors occurred.',
+            errors: { Email: ['Email is not valid'] },
+          },
+          { status: 400 },
+        ),
+      ),
+    )
+    const wrapper = mountList()
+    await settle()
+    expect(memberReads).toBe(1)
+
+    await wrapper.find('[data-testid="add-member"]').trigger('click')
+    await flushPromises()
+    const email = document.querySelector<HTMLInputElement>('#add-member-email')!
+    email.value = 'grace@example.com'
+    email.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    document.querySelector<HTMLButtonElement>('[data-testid="add-member-submit"]')!.click()
+    await settle()
+
+    // The invalidation cycle refetched (transient role blip), yet the
+    // dialog is OPEN and the mapped inline error is visible.
+    expect(memberReads).toBe(2)
+    expect(document.querySelector('[data-testid="add-member-submit"]')).not.toBeNull()
+    expect(document.querySelector('#add-member-email-error')?.textContent).toContain(
+      'Email is not valid',
+    )
+    expect(useToast().toasts.value.some((t) => t.variant === 'success')).toBe(false)
+
+    // True ownership loss (a SETTLED Viewer role) still closes it.
+    await queryClient.invalidateQueries({ queryKey: membersKeys.list(BOARD), exact: true })
+    await settle()
+    expect(memberReads).toBe(3)
+    expect(document.querySelector('[data-testid="add-member-submit"]')).toBeNull()
+    expect(wrapper.find('[data-testid="add-member"]').exists()).toBe(false)
   })
 
   it('keeps the component reactive when boardId changes', async () => {

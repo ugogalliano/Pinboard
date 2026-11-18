@@ -32,21 +32,48 @@ describe('loginSchema', () => {
 describe('registerSchema', () => {
   it('accepts a complete registration', () => {
     expect(
-      registerSchema.safeParse({ email: 'a@b.co', password: 'hunter2', displayName: 'Ada' })
+      registerSchema.safeParse({ email: 'a@b.co', password: 'hunter23', displayName: 'Ada' })
         .success,
     ).toBe(true)
   })
 
+  it('enforces the server password floor: exactly 8 chars ok, 7 fails', () => {
+    expect(
+      registerSchema.safeParse({
+        email: 'a@b.co',
+        password: '12345678',
+        displayName: 'Ada',
+      }).success,
+    ).toBe(true)
+    expect(
+      registerSchema.safeParse({ email: 'a@b.co', password: '1234567', displayName: 'Ada' }).success,
+    ).toBe(false)
+  })
+
+  it('requires a non-blank displayName with no maximum length', () => {
+    expect(
+      registerSchema.safeParse({ email: 'a@b.co', password: 'hunter23', displayName: '   ' })
+        .success,
+    ).toBe(false)
+    expect(
+      registerSchema.safeParse({
+        email: 'a@b.co',
+        password: 'hunter23',
+        displayName: 'x'.repeat(500),
+      }).success,
+    ).toBe(true)
+  })
+
   it('rejects a missing displayName', () => {
-    expect(registerSchema.safeParse({ email: 'a@b.co', password: 'x' }).success).toBe(false)
-    expect(registerSchema.safeParse({ email: 'a@b.co', password: 'x', displayName: '' }).success).toBe(
-      false,
-    )
+    expect(registerSchema.safeParse({ email: 'a@b.co', password: 'hunter23' }).success).toBe(false)
+    expect(
+      registerSchema.safeParse({ email: 'a@b.co', password: 'hunter23', displayName: '' }).success,
+    ).toBe(false)
   })
 
   it('rejects a malformed email', () => {
     expect(
-      registerSchema.safeParse({ email: 'a@b', password: 'x', displayName: 'Ada' }).success,
+      registerSchema.safeParse({ email: 'a@b', password: 'hunter23', displayName: 'Ada' }).success,
     ).toBe(false)
   })
 })
@@ -113,6 +140,28 @@ describe('noteSchema', () => {
         .safeParse({ content: 'x', color: 'note-green', positionX: 'ten', positionY: 0 })
         .success,
     ).toBe(false)
+  })
+
+  it('accepts integer positions at the exact sanity bounds, including negatives', () => {
+    for (const pos of [0, 1_000_000, -1_000_000]) {
+      expect(
+        noteSchema.safeParse({ content: 'x', color: 'note-green', positionX: pos, positionY: pos })
+          .success,
+      ).toBe(true)
+    }
+  })
+
+  it('rejects positions just past the bounds and non-integer positions', () => {
+    for (const pos of [1_000_001, -1_000_001, 12.5]) {
+      expect(
+        noteSchema.safeParse({ content: 'x', color: 'note-green', positionX: pos, positionY: 0 })
+          .success,
+      ).toBe(false)
+      expect(
+        noteSchema.safeParse({ content: 'x', color: 'note-green', positionX: 0, positionY: pos })
+          .success,
+      ).toBe(false)
+    }
   })
 })
 

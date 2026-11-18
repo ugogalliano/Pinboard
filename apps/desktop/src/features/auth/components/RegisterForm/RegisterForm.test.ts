@@ -53,7 +53,7 @@ describe('RegisterForm', () => {
   async function fillAndSubmit(wrapper: ReturnType<typeof mountForm>) {
     await wrapper.find('#displayName').setValue('Ada')
     await wrapper.find('#email').setValue('a@b.co')
-    await wrapper.find('#password').setValue('hunter2')
+    await wrapper.find('#password').setValue('hunter23')
     await wrapper.find('form').trigger('submit')
     await settle()
   }

@@ -70,20 +70,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useField, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
-import { Button, Dialog, Input } from '@ugogalliano/pm-design-system-vue'
+import { Button, Dialog, Input, useToast } from '@ugogalliano/pm-design-system-vue'
 
 import { memberSchema } from '@/shared/validation/schemas'
-import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
+import { isApiError, mapApiErrorToMessage, mapProblemErrors } from '@/shared/services/api'
 import type { AssignableRole } from '@/shared/types/api'
 import { useAddMember, useCurrentBoardRole } from '../../composables/useMembers'
 
 const props = defineProps<{ boardId: string; open: boolean }>()
 const emit = defineEmits<{ (event: 'update:open', value: boolean): void }>()
+const { toast } = useToast()
 
-const { handleSubmit, isSubmitting, resetForm } = useForm({
+const { handleSubmit, isSubmitting, resetForm, setErrors } = useForm({
   validationSchema: toTypedSchema(memberSchema),
   initialValues: { role: 'Editor' as AssignableRole },
 })
@@ -97,10 +98,17 @@ function close(): void {
   emit('update:open', false)
 }
 
+// Close only on a SETTLED non-Owner role. A transient `null` from
+// useCurrentBoardRole (pending/refetching/failing reads are fail-closed by
+// design) must NOT close the dialog: the mutation's own `onSettled`
+// invalidation refetches the members list after EVERY add attempt, so
+// treating that blip as "no longer Owner" would dismiss the dialog exactly
+// when the user needs to fix a field error and retry. Render-level gating
+// (`:open="open && isOwner"`, disabled controls) still fails closed.
 watch(
-  isOwner,
-  (owner) => {
-    if (!owner && props.open) close()
+  currentRole,
+  (role) => {
+    if (role !== null && role !== 'Owner' && props.open) close()
   },
   { flush: 'sync' },
 )
@@ -116,6 +124,35 @@ watch(
   { immediate: true },
 )
 
+// Deferred field writes: when the DS footer Button flips its `loading`/
+// `disabled` as isSubmitting settles, the reka-ui content re-render remounts
+// the INPUT and its vee-validate PathState is dropped — a field error set
+// synchronously inside the callback is therefore wiped a beat later
+// (verified: the Dialog `dismissable` and Input `disabled` flips are
+// innocent; the footer-button flip is the culprit). The synchronous write
+// shows the error immediately; the setTimeout(0) re-write lands AFTER that
+// flush so it PERSISTS (0 ms = the next macrotask, after Vue's microtask
+// re-render — the refetch round-trip takes far longer, see the tests).
+// Follow-up candidate: lift this double-write into a shared helper once a
+// second dialog needs it (deliberately NOT extracted now: minimal diff).
+let fieldErrorTimer: ReturnType<typeof setTimeout> | null = null
+
+function applyFieldErrors(fields: Record<string, string>): void {
+  setErrors(fields)
+  if (fieldErrorTimer !== null) clearTimeout(fieldErrorTimer)
+  fieldErrorTimer = setTimeout(() => {
+    fieldErrorTimer = null
+    setErrors(fields)
+  }, 0)
+}
+
+// A pending rewrite into an unmounted form is pointless (and a stray timer
+// keeps the callback alive past teardown): cancel it with the scope.
+onScopeDispose(() => {
+  if (fieldErrorTimer !== null) clearTimeout(fieldErrorTimer)
+  fieldErrorTimer = null
+})
+
 const onSubmit = handleSubmit(async (values) => {
   if (!isOwner.value) {
     close()
@@ -124,12 +161,25 @@ const onSubmit = handleSubmit(async (values) => {
   formError.value = null
   try {
     await mutateAsync(values)
+    // Success toast (§13 "Success toasts"): the dialog closes and the new
+    // row lands in a list that may not be in view.
+    toast({ variant: 'success', message: 'Member added' })
     close()
   } catch (error) {
-    if (isApiError(error) && error.status === 409) {
+    // Precedence mirrors useAuth.handleAuthError: an `errors` dict maps to
+    // field errors FIRST; only a dict-less 400 falls back to `detail`.
+    if (isApiError(error) && error.status === 400) {
+      const fields = mapProblemErrors(error.problem)
+      if (Object.keys(fields).length > 0) {
+        applyFieldErrors(fields)
+      } else {
+        formError.value = mapApiErrorToMessage(error)
+      }
+    } else if (isApiError(error) && error.status === 404) {
+      // Unknown email: no account to invite — the actionable field is email.
+      applyFieldErrors({ email: 'No account with this email exists' })
+    } else if (isApiError(error) && error.status === 409) {
       formError.value = `${mapApiErrorToMessage(error)}. Check whether this email is already a board member, then try again.`
-    } else if (isApiError(error) && error.status === 400) {
-      formError.value = mapApiErrorToMessage(error)
     }
     // Mutation errors are already safely mapped to a toast by useAddMember.
   }

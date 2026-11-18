@@ -448,7 +448,7 @@ describe('apiClient', () => {
 })
 
 describe('mapProblemErrors', () => {
-  it('lowercases PascalCase/dotted keys to field names and keeps the first message', () => {
+  it('resolves PascalCase/dotted keys to camelCase field names and keeps the first message', () => {
     expect(
       mapProblemErrors({
         status: 400,
@@ -460,6 +460,36 @@ describe('mapProblemErrors', () => {
     ).toEqual({
       email: 'Email is already taken',
       password: 'Password is too short',
+    })
+  })
+
+  it('lowercases only the FIRST character of the final segment (multi-word fields)', () => {
+    expect(
+      mapProblemErrors({
+        status: 400,
+        errors: {
+          DisplayName: ['Display name is required'],
+          'RegisterRequest.DisplayName': ['Display name is required'],
+        },
+      }),
+    ).toEqual({ displayName: 'Display name is required' })
+  })
+
+  it('handles JSON-pointer keys, keeps already-camelCase keys, and leaves unknown shapes sane', () => {
+    expect(
+      mapProblemErrors({
+        status: 400,
+        errors: {
+          '$.positionX': ['X is out of range'],
+          '$.DisplayName': ['Display name is required'],
+          displayName: ['Already camel'],
+          weird_key: ['kept'],
+        },
+      }),
+    ).toEqual({
+      positionX: 'X is out of range',
+      displayName: 'Already camel',
+      weird_key: 'kept',
     })
   })
 
