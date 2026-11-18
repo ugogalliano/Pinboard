@@ -142,7 +142,12 @@ Notes:    GET/POST /api/boards/{id}/notes; PUT/DELETE /api/notes/{noteId}
 
 - Zod schemas (`shared/validation/schemas.ts`) mirror backend limits exactly:
   board name required ≤200, note content required ≤1000, note color required
-  ≤50, role must be `"Editor" | "Viewer"`, auth fields required (email + format).
+  ≤50, note positions integer within ±1 000 000 (shared constants in
+  `shared/constants/note-position-bounds.ts`, also enforced at the drag /
+  double-click call sites — out-of-range gestures are rejected client-side
+  without a request), role must be `"Editor" | "Viewer"`, email required +
+  format, register password ≥8 chars and non-blank displayName (no server
+  max).
 - Forms validate through VeeValidate with `toTypedSchema`; submit is disabled
   while pending; errors render inline; submissions go through a `useMutation`.
 - **Client validation is UX, not security** — the backend is authoritative.

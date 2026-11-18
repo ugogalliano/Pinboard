@@ -139,12 +139,14 @@ apps/desktop/
 │   │       └── index.ts
 │   ├── shared/
 │   │   ├── components/
-│   │   │   ├── ui/               # only Spinner/ is local: Button/Input/Dialog/
-│   │   │   │                     # Toast/Toaster come from the design system
-│   │   │   │                     # (@ugogalliano/pm-design-system-vue);
-│   │   │   │                     # ErrorFallback is deferred (Phase 8, §13)
-│   │   │   │   └── Spinner/
-│   │   │   │       └── Spinner.vue
+│   │   │   ├── ui/               # the local ones are Spinner/,
+│   │   │   │   ├── ConnectionStatus/   # ConnectionStatus/ and
+│   │   │   │   │   └── ConnectionStatus.vue
+│   │   │   │   ├── ErrorFallback/      # ErrorFallback/; everything else
+│   │   │   │   │   └── ErrorFallback.vue  # (Button/Input/Dialog/
+│   │   │   │   └── Spinner/            # Toast/Toaster) comes from the
+│   │   │   │       └── Spinner.vue     # design system
+│   │   │   │                           # (@ugogalliano/pm-design-system-vue)
 │   │   │   └── layout/
 │   │   │       ├── Sidebar/
 │   │   │       │   └── Sidebar.vue
@@ -234,8 +236,15 @@ Validation constraints (frontend reference):
 - Board Name: required, max 200 chars
 - Note Content: required, max 1000 chars
 - Note Color: required, max 50 chars
+- Note Position (positionX/positionY): INTEGER, sanity bounds ±1 000 000
+  (negatives allowed; shared constants in `shared/constants/
+  note-position-bounds.ts`, enforced by the schema AND the drag/double-click
+  call sites so out-of-range gestures never issue a request)
 - Member Role: must be valid AssignableRole
-- Auth fields: email required + valid format, password required, displayName required (register)
+- Auth fields: email required + valid format; register password min 8 (length
+  only — complexity is not validated client- or server-side); displayName
+  required, non-blank, no server max
+- Duplicate register email → 409 with `detail` (mapped to the email field)
 
 These constraints are encoded once as Zod schemas (§5) and are the only client-side validation source of truth.
 ---
@@ -624,6 +633,25 @@ Authorization-aware rendering:
 409 → "This action conflicts with current state"
 500 → "Something went wrong. Please try again."
 ```
+
+### Success toasts
+
+Rule: show a success toast when the mutation's outcome is NOT visible on
+screen afterwards; otherwise the visual change IS the feedback and a toast
+would be noise. Phase 8 ships exactly four success toasts:
+
+- `Board created` — CreateBoardDialog (the dialog closes and the list refetch
+  may not be in view)
+- `Board renamed` — BoardHeader rename (the header may be scrolled away)
+- `Member added` — AddMemberDialog (the new row lands in the members list)
+- `Member removed` — MemberList confirmRemove (removal is subtle)
+
+Never for: login/register/logout (navigation follows), note create/update/
+delete and drag (the card changes right under the cursor), role change (the
+badge updates). Placement: in the component owning the flow, immediately
+after the awaited `mutateAsync` succeeds, `variant: 'success'` — never inside
+composables (they stay toast-policy-free for success and only own error
+toasts).
 ---
 
 ## 14. Testing
@@ -695,9 +723,18 @@ features/notes/
 ### Vite proxy
 
 ```text
-/api → https://localhost:5001 (secure: false)
-/hubs → https://localhost:5001 (ws: true, secure: false)
+/api  → http://localhost:5180 (secure: false)
+/hubs → http://localhost:5180 (ws: true, secure: false)
 ```
+
+Target is overridable via `VITE_PROXY_TARGET` — set it to
+`https://localhost:7113` when the API runs its HTTPS Kestrel profile
+(`secure: false` accepts the dev certificate).
+
+> Documented deviation: this section previously pinned `https://localhost:5001`,
+> a port no launch profile in `apps/server` serves. The real Kestrel profiles
+> are `http://localhost:5180` (default, what `vite.config.ts` falls back to)
+> and `https://localhost:7113`.
 
 Base path: `"./"` for Tauri compatibility.
 
@@ -726,9 +763,20 @@ npm test             # Vitest
 
 ## 17. Known backend gaps (frontend awareness)
 
-1. SignalR JoinBoard only checks authentication, not board membership. Frontend should not rely on this for security.
-2. Note content validated at 1000 chars app-level, but EF config allows 2000. Frontend should enforce 1000.
-3. AuthService.RegisterAsync creates User twice. If touching auth, clean up.
+1. ~~SignalR JoinBoard only checks authentication, not board membership.~~
+   **Resolved server-side**: `BoardHub.JoinBoard` verifies membership via
+   `IBoardAuthorizationService.CanReadBoardAsync` and rejects non-members with
+   a `HubException`. Residual limitation (frontend-safe): membership is
+   checked at join time only, so already-joined connections keep receiving
+   events until they reconnect — the frontend must still not treat hub data
+   as a security boundary.
+2. ~~Note content validated at 1000 chars app-level, but EF config allows
+   2000.~~ **Resolved**: app, EF (`AlterNoteContentMaxLengthTo1000`
+   migration) and the frontend Zod schema now all enforce 1000 end-to-end.
+3. ~~AuthService.RegisterAsync creates User twice.~~ **Verified fixed**: the
+   parallel server workstream converged on the dominant "save once in the
+   service" pattern (user + refresh token commit in a single
+   `SaveChangesAsync`); no double-create remains.
 
 ---
 
@@ -956,10 +1004,10 @@ feat: add realtime board collaboration
 ### Phase 8 — Polish
 
 Tasks:
-- integrate global error handler (`app.config.errorHandler` + `onErrorCaptured`) at app root
+- integrate global error handler (`app.config.errorHandler` + `onErrorCaptured`) at app root → `ErrorFallback.vue` with retry (retry remounts the routed content; no cache-wide invalidation)
 - add loading states (spinners) for all async operations (query `isPending`)
 - add empty states (no boards, no notes, no members)
-- add toast notifications for all success/error flows
+- add toast notifications: error toasts for every failure flow; success toasts only where the outcome is not visible afterwards (§13 "Success toasts": board created/renamed, member added/removed)
 - adjust layout for Tauri window sizes
 - add keyboard shortcuts (Escape to close dialogs, etc.)
 - final cleanup and code review
@@ -967,6 +1015,7 @@ Tasks:
 Acceptance criteria:
 - all loading states show spinners
 - all error states show toasts
+- an uncaught component error shows the ErrorFallback (mapped message only, never raw error text) and Try again remounts the routed content
 - empty states have helpful messages
 - app looks correct at 800x600 and 1280x800
 - no console errors

@@ -29,8 +29,9 @@ $env:VITE_PROXY_TARGET = "https://localhost:7113"   # e.g. per launchSettings pr
 npm run dev
 ```
 
-Default fallback: `https://localhost:7113` (the actual Kestrel https profile —
-PLAN.FE.md §15 says `5001`; see the note in `vite.config.ts`).
+Default fallback: `http://localhost:5180` (the API's HTTP Kestrel profile).
+Set `VITE_PROXY_TARGET` to `https://localhost:7113` when you run the HTTPS
+profile instead (see PLAN.FE.md §15).
 
 ## Prerequisites
 

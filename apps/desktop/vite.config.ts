@@ -6,11 +6,10 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
 
-// NOTE: PLAN.FE.md §15 pins the backend at https://localhost:5001, but
-// apps/server launchSettings.json actually serves https://localhost:7113
-// (and http://localhost:5180). Target is configurable via VITE_PROXY_TARGET;
-// the fallback is the real Kestrel https profile. Keep the doc conflict on
-// record here until PLAN §15 is reconciled.
+// Dev-server proxy target: the API's HTTP Kestrel profile by default.
+// Override with VITE_PROXY_TARGET, e.g. when the API runs the HTTPS profile
+// (`$env:VITE_PROXY_TARGET = "https://localhost:7113"`; `secure: false` below
+// then accepts its dev certificate). PLAN.FE.md §15 documents the same.
 const proxyTarget = process.env.VITE_PROXY_TARGET ?? 'http://localhost:5180'
 
 export default defineConfig({
