@@ -22,6 +22,7 @@ apps/server/
 │   ├── PostIt.Api/                # Presentation: controllers, SignalR hub, middleware, Program.cs
 │   │   ├── Controllers/           #   AuthController, BoardsController, NotesController
 │   │   ├── Hubs/BoardHub.cs
+│   │   ├── Hubs/BoardGroup.cs
 │   │   ├── Middleware/ExceptionHandlingMiddleware.cs
 │   │   ├── Services/BoardNotificationService.cs
 │   │   └── Migrations/            # EF Core migrations live HERE (MigrationsAssembly = "PostIt.Api")
@@ -57,12 +58,11 @@ Key mechanics:
   `AddInfrastructure()`. `IBoardNotificationService` is Api-side (it wraps
   `IHubContext`) and is registered in `Program.cs`.
 - **Unit of work**: repositories track entities on the shared Scoped
-  `PostItDbContext`; **services call `SaveChangesAsync` once per use case** so
-  multi-entity writes (e.g. board + owner member) commit in a single
-  transaction. Exceptions to the rule: `AuthService` and
-  `RefreshTokenRepository` save inside the repository (`RefreshTokenRepository.AddAsync`
-  calls `SaveChangesAsync` itself). Follow the dominant "save once in the
-  service" pattern for new code.
+  `PostItDbContext`; **services call `SaveChangesAsync` once per use case**
+  (via a repository's `SaveChangesAsync`) so multi-entity writes (e.g. board +
+  owner member, or user + refresh token on registration) commit in a single
+  transaction. Repositories never save themselves. Follow this "save once in
+  the service" pattern for new code.
 - **Realtime**: after a successful mutation the service calls
   `IBoardNotificationService.PostIt*` to broadcast over SignalR. Broadcast
   **only after** `SaveChangesAsync` succeeds — never before persistence.
@@ -179,10 +179,15 @@ escapes is caught by `ExceptionHandlingMiddleware` → 500
   `Validate*(...)` helpers throwing `ArgumentException` (e.g.
   `NoteService.ValidateContent`/`ValidateColor`, `BoardService.ValidateName`).
   Keep this style for new validations.
-- Current limits (align with the app-level checks, note the DB mismatch):
-  - Note `Content`: required, ≤ **1000** chars (app) — but the EF
-    `NoteConfiguration` allows **2000**. `Color`: required, ≤ 50.
+- Current limits:
+  - Note `Content`: required, ≤ **1000** chars (app and EF
+    `NoteConfiguration` aligned). `Color`: required, ≤ 50.
+  - Note `PositionX`/`PositionY`: |value| ≤ 1 000 000.
   - Board `Name`: required, ≤ 200.
+  - Register: email must parse (`MailAddress.TryCreate`) and is canonicalized
+    (parsed address, trimmed, lowercased) before storage/lookup; password ≥ 8
+    chars; display name required; duplicate
+    email → `InvalidOperationException` → 409.
   - Member roles via `Enum.TryParse<BoardRole>`; `Owner` is not assignable by
     clients; removing the last Owner is rejected.
 
@@ -203,9 +208,9 @@ escapes is caught by `ExceptionHandlingMiddleware` → 500
   - `RefreshTokens.Token` unique index.
 - **Migrations**: stored in **`src/PostIt.Api/Migrations/`** (the Api project is
   the migrations assembly — `MigrationsAssembly("PostIt.Api")` is set in
-  `AddInfrastructure`). `ARCHITECTURE.md` shows an outdated location; trust the
-  code. Three migrations exist (`Initial`, `AddDatabaseModel`,
-  `AddRefreshTokens`).
+  `AddInfrastructure`). Six migrations exist (`Initial`, `AddDatabaseModel`,
+  `AddRefreshTokens`, `InitialCreate` no-op, `AlterNoteContentMaxLengthTo1000`,
+  `NormalizeUserEmailsToLowercase`).
 
 Commands (run from `apps/server` unless noted):
 
@@ -289,10 +294,11 @@ prefer validating against the real Postgres path when Docker is available.
   (`?access_token=...`) but only for paths under `/hubs`.
 - **CORS**: `LocalDevelopment` policy only — `http://localhost:5173` and
   `http://localhost:3000`.
-- **Known gap** (do not silently rely on): `BoardHub.JoinBoard` adds a
-  connection to the group without verifying the caller is a board member —
-  only authentication is enforced. If you work on the hub, treat membership
-  verification as an open requirement and flag it rather than assuming it.
+- **SignalR board groups**: `BoardHub.JoinBoard` verifies membership via
+  `IBoardAuthorizationService.CanReadBoardAsync` before adding the connection
+  to the `board:{boardId}` group and rejects non-members with a `HubException`.
+  Residual limitation: membership is checked at join time only — already-joined
+  connections keep receiving broadcast events until they reconnect.
 - Never log tokens, passwords, or `PasswordHash`.
 
 ## 8. Performance and observability

@@ -163,6 +163,21 @@ dotnet ef database update --project src/PostIt.Api --startup-project src/PostIt.
 Any model change (entity, EF configuration, DbContext) requires a new checked-in
 migration. Never hand-edit the schema.
 
+> Pre-deploy checks for this release (both migrations must be applied **with or
+> before** the app deployment — login and member lookups now query normalized,
+> lowercased emails):
+>
+> - `AlterNoteContentMaxLengthTo1000` will fail if any `Notes.Content` rows
+>   exceed 1000 characters (lengths 1001–2000 abort the `ALTER`; none expected,
+>   the application limit was already 1000). Verify with:
+>   `SELECT count(*) FROM "Notes" WHERE length("Content") > 1000;`
+> - `NormalizeUserEmailsToLowercase` backfills `Users.Email` to
+>   `lower(trim(...))` and aborts on canonical (case- or whitespace-)
+>   collisions. Verify there are none beforehand (must return zero rows):
+>   `SELECT lower(trim("Email")), count(*) FROM "Users" GROUP BY 1 HAVING count(*) > 1;`
+>   If it returns rows, resolve the duplicate accounts manually before running
+>   the migration.
+
 ---
 
 ## 7. Production
@@ -280,11 +295,15 @@ the `postgresql` check in `/health`.
 - **JWT**: 15-minute access tokens (HMAC-SHA256); refresh tokens are 32 random
   bytes, 7-day expiry, **rotated on every use**, and revoked on logout. Claims:
   `sub`, `email`, `jti`. `ClockSkew` is zero.
-- **Known authz gap**: `BoardHub.JoinBoard` adds a connection to the board group
-  without verifying the caller is a board member (authentication only). Treat
-  membership verification as an open requirement.
+- **SignalR board groups**: `BoardHub.JoinBoard` verifies the caller is a board
+  member (via `IBoardAuthorizationService.CanReadBoardAsync`) and rejects
+  non-members with a `HubException` before adding the connection to the
+  `board:{boardId}` group; `LeaveBoard` requires no membership. Residual
+  limitation: connections that joined while the user was a member keep
+  receiving broadcast events until they reconnect — membership is checked at
+  join time only.
 - **Logging**: structured single-line console output with UTC timestamps;
   sensitive data (passwords, tokens, headers, note content) is never logged.
 - **Migrations location**: EF migrations live in `src/PostIt.Api/Migrations`
-  (the Api project is the migrations assembly). `ARCHITECTURE.md` shows an
-  outdated path — trust the code and this README.
+  (the Api project is the migrations assembly). `ARCHITECTURE.md` reflects the
+  same location.

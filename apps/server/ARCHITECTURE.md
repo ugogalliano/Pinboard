@@ -53,7 +53,6 @@ erDiagram
     USER {
         uuid Id PK
         string Email
-        string NormalizedEmail
         string PasswordHash
         string DisplayName
         datetime CreatedAt
@@ -94,7 +93,7 @@ erDiagram
         uuid UserId FK
         datetime ExpiresAt
         datetime CreatedAt
-        datetime RevokedAt
+        bool IsRevoked
         string ReplacedByToken
     }
 ```
@@ -137,7 +136,7 @@ DELETE /api/notes/{id}            → Delete note (Owner/Editor)
 
 ### Realtime
 ```
-/hubs/boards  → SignalR hub for realtime collaboration
+/hubs/board   → SignalR hub for realtime collaboration (JWT via ?access_token=)
 ```
 
 ### Health
@@ -159,7 +158,7 @@ sequenceDiagram
     API->>AuthService: RegisterAsync(...)
     AuthService->>DB: Create User
     AuthService-->>API: UserDto
-    API-->>Client: 201 Created
+    API-->>Client: 200 OK
 
     Client->>API: POST /api/auth/login (email, password)
     API->>AuthService: LoginAsync(...)
@@ -208,7 +207,7 @@ sequenceDiagram
     BoardService->>DB: Create BoardMember (Owner)
     BoardService->>DB: SaveChangesAsync()
     BoardService-->>API: BoardDto
-    API-->>Client: 201 Created
+    API-->>Client: 200 OK
 
     Client->>API: GET /api/boards [JWT]
     API->>BoardService: GetBoardsAsync(userId)
@@ -239,20 +238,20 @@ sequenceDiagram
 
     Client->>BoardHub: Connect + JoinBoard(boardId)
     BoardHub->>AuthZ: CanReadBoardAsync(userId, boardId)
-    AuthZ-->>BoardHub: true
-    BoardHub->>BoardHub: Groups.AddAsync(userId, "board:{boardId}")
+    AuthZ-->>BoardHub: true (non-members get HubException, not added to group)
+    BoardHub->>BoardHub: Groups.AddToGroupAsync(connectionId, "board:{boardId}")
     BoardHub-->>Client: Joined
 
     Client->>API: POST /api/boards/{id}/notes (content, color, x, y) [JWT]
     API->>NoteService: CreateNoteAsync(...)
-    NoteService->>AuthZ: CanCreatePostItAsync(userId, boardId)
+    NoteService->>AuthZ: CanCreateNoteAsync(userId, boardId)
     AuthZ-->>NoteService: true
-    NoteService->>DB: Create PostIt
+    NoteService->>DB: Create Note
     NoteService->>DB: SaveChangesAsync()
     NoteService->>IHubContext: Clients.Group("board:{boardId}").PostItCreated(noteDto)
     IHubContext->>Client: PostItCreated event
     NoteService-->>API: NoteDto
-    API-->>Client: 201 Created
+    API-->>Client: 200 OK
 ```
 
 ## 7. Authorization Matrix
@@ -283,9 +282,11 @@ apps/server/
 │   │   │   ├── BoardsController.cs
 │   │   │   └── NotesController.cs
 │   │   ├── Hubs/
+│   │   │   ├── BoardGroup.cs
 │   │   │   └── BoardHub.cs
 │   │   ├── Middleware/
 │   │   │   └── ExceptionHandlingMiddleware.cs
+│   │   ├── Migrations/
 │   │   ├── Services/
 │   │   │   └── BoardNotificationService.cs
 │   │   ├── Program.cs
@@ -300,8 +301,7 @@ apps/server/
 │   └── PostIt.Infrastructure/
 │       ├── Persistence/
 │       │   ├── PostItDbContext.cs
-│       │   ├── Repositories/
-│       │   └── Migrations/
+│       │   └── Repositories/
 │       └── DependencyInjection.cs
 └── tests/
     ├── PostIt.UnitTests/
