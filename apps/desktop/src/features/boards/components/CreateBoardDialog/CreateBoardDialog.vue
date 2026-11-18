@@ -44,7 +44,7 @@
 import { ref, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
-import { Button, Dialog, Input } from '@ugogalliano/pm-design-system-vue'
+import { Button, Dialog, Input, useToast } from '@ugogalliano/pm-design-system-vue'
 
 import { boardNameSchema } from '@/shared/validation/schemas'
 import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
@@ -52,6 +52,7 @@ import { useCreateBoard } from '../../composables/useBoards'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ (e: 'update:open', value: boolean): void }>()
+const { toast } = useToast()
 
 const { handleSubmit, isSubmitting, resetForm } = useForm({
   validationSchema: toTypedSchema(boardNameSchema),
@@ -84,6 +85,11 @@ const onSubmit = handleSubmit(async (values) => {
   formError.value = null
   try {
     await mutateAsync({ name: values.name })
+    // Success toast (§13 "Success toasts"): the created board is not
+    // necessarily in view once the dialog closes, so the outcome needs a
+    // signal of its own. Component-owned, immediately after the awaited
+    // success — never inside the composable.
+    toast({ variant: 'success', message: 'Board created' })
     close()
   } catch (err) {
     if (isApiError(err) && err.status === 400) {

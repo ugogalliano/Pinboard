@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, type Router } from 'vue-router'
+import { useToast } from '@ugogalliano/pm-design-system-vue'
 import App from '@/app/App/App.vue'
 import { createAppRouter } from '@/app/router'
 import { boardsKeys } from '@/features/boards'
@@ -106,6 +107,12 @@ function stubApi(seed: BoardDto[] = []): void {
 describe('boards flow (integration)', () => {
   let pinia: ReturnType<typeof createPinia>
   let queryClient: QueryClient
+  // Phase 8: mounted App instances are tracked so afterEach can UNMOUNT
+  // them. Success toasts now fire inside these flows; an App left alive
+  // while `document.body.innerHTML = ''` wipes its DOM behind it becomes a
+  // zombie whose next toast-driven patch corrupts the shared scheduler
+  // (crash in shouldUpdateComponent) and starves the next test's render.
+  let mounted: ReturnType<typeof mount> | null = null
 
   beforeEach(() => {
     pinia = createPinia()
@@ -115,10 +122,14 @@ describe('boards flow (integration)', () => {
     })
     localStorage.clear()
     clearTokens()
+    useToast().clear()
     document.body.innerHTML = ''
   })
 
   afterEach(() => {
+    mounted?.unmount()
+    mounted = null
+    useToast().clear()
     document.body.innerHTML = ''
   })
 
@@ -135,6 +146,7 @@ describe('boards flow (integration)', () => {
     const wrapper = mount(App, {
       global: { plugins: [pinia, router, [VueQueryPlugin, { queryClient }]] },
     })
+    mounted = wrapper
     await router.isReady()
     return { wrapper, router }
   }

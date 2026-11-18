@@ -201,6 +201,9 @@ const submitRename = handleSubmit(async (values) => {
   renameError.value = null
   try {
     await updateBoard({ id: board.value.id, name: values.name })
+    // Success toast (§13 "Success toasts"): the renamed header may be
+    // scrolled out of view — the name change alone is not reliable feedback.
+    toast({ variant: 'success', message: 'Board renamed' })
     renaming.value = false
   } catch (err) {
     if (isApiError(err) && err.status === 400) {

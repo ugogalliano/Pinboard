@@ -122,6 +122,11 @@ describe('CreateBoardDialog', () => {
     await fillAndSubmit('Roadmap')
 
     expect(postBody).toEqual({ name: 'Roadmap' })
+    // Success toast (§13): exactly ONE, success variant, expected message.
+    const toasts = useToast().toasts.value
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.variant).toBe('success')
+    expect(toasts[0]!.message).toBe('Board created')
     // Invalidation refetched the list, which now serves the new board.
     const listGets = callsTo(API_URLS.boards.list).filter((entry) => entry.method === 'GET')
     expect(listGets).toHaveLength(2)
@@ -147,6 +152,8 @@ describe('CreateBoardDialog', () => {
     // and the dialog stays open for a retry.
     expect(nameInput()).not.toBeNull()
     expect(document.querySelector('#create-board-name-error')).toBeNull()
+    // A failed create never produces the success toast.
+    expect(useToast().toasts.value.some((t) => t.variant === 'success')).toBe(false)
   })
 
   it('surfaces unexpected failures as an error toast and keeps the dialog open', async () => {
@@ -166,5 +173,8 @@ describe('CreateBoardDialog', () => {
     expect(toasts[0]!.message).toBe('Something went wrong. Please try again.')
     expect(document.querySelector('[role="alert"]')).toBeNull()
     expect(nameInput()).not.toBeNull()
+    // Exactly one toast: the composable's error toast, never a second one
+    // from the component — and never a success toast for a failed create.
+    expect(toasts.some((t) => t.variant === 'success')).toBe(false)
   })
 })

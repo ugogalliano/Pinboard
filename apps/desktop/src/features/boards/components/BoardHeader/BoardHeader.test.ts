@@ -287,6 +287,11 @@ describe('BoardHeader', () => {
     await settle()
 
     expect(putBody).toEqual({ name: 'Renamed board' })
+    // Success toast (§13): exactly ONE success toast 'Board renamed'.
+    const toasts = useToast().toasts.value
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.variant).toBe('success')
+    expect(toasts[0]!.message).toBe('Board renamed')
     expect(queryClient.getQueryData<BoardDto>(boardsKeys.detail('b1'))?.name).toBe('Renamed board')
     expect(
       queryClient.getQueryData<BoardDto[]>(boardsKeys.all)?.find((item) => item.id === 'b1')?.name,
@@ -427,7 +432,10 @@ describe('BoardHeader', () => {
     expect(router.currentRoute.value.path).toBe('/')
     expect(queryClient.getQueryData(boardsKeys.detail('b1'))).toBeUndefined()
     expect(listGets).toBe(listGetsBefore + 1)
-    expect(useToast().toasts.value.map((t) => t.message)).toContain('Board deleted')
+    // 'Board deleted' stays EXACTLY one toast (no rename/other toasts leak in).
+    const toasts = useToast().toasts.value
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.message).toBe('Board deleted')
   })
 
   it('keeps the user on the board and toasts when the delete is rejected', async () => {
