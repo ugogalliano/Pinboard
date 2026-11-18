@@ -1,5 +1,6 @@
 import { computed, getCurrentScope, onBeforeUnmount, onScopeDispose, ref, type MaybeRef } from 'vue'
 
+import { isWithinNotePositionBounds } from '@/shared/constants/note-position-bounds'
 import { useUpdateNote } from './useNotes'
 
 /** A point in canvas coordinates (pixels, matching positionX/positionY). */
@@ -58,10 +59,17 @@ export function clientToCanvas(
   scrollLeft: number,
   scrollTop: number,
 ): CanvasPoint {
+  // The wire type is int; never send fractions (server mirrors this with an
+  // integer validation, ArgumentException → 400 beyond bounds).
   return {
-    x: Math.round((clientX - rect.left + scrollLeft) * 100) / 100,
-    y: Math.round((clientY - rect.top + scrollTop) * 100) / 100,
+    x: Math.round(clientX - rect.left + scrollLeft),
+    y: Math.round(clientY - rect.top + scrollTop),
   }
+}
+
+/** Snap a gesture position to the wire shape: whole pixels, server bounds. */
+function toWirePosition(x: number, y: number): CanvasPoint {
+  return { x: Math.round(x), y: Math.round(y) }
 }
 
 /**
@@ -192,13 +200,17 @@ export function useDragNote(options: UseDragNoteOptions) {
   function endDrag(): void {
     if (draggingId.value === null) return
     const id = draggingId.value
-    const { x, y } = livePosition.value
+    // Whole pixels on the WIRE shape before anything is committed or retained.
+    const { x, y } = toWirePosition(livePosition.value.x, livePosition.value.y)
     // A gesture with ZERO net movement (a plain click / one half of a card
     // double-click) does not change the position — committing it would fire a
     // redundant PUT per click and double the PUTs of a dblclick-to-edit.
     if (dragOffset.value.x !== 0 || dragOffset.value.y !== 0) {
       commit(id, x, y)
-      if (!id.startsWith('temp-')) {
+      // An out-of-bounds drop is IGNORED (no commit inside `commit`), so no
+      // retained visual either: the card truthfully snaps back to its cached
+      // position instead of hovering at a spot the server would reject.
+      if (!id.startsWith('temp-') && isWithinNotePositionBounds(x, y)) {
         pendingVisual.value = { id, x, y }
       }
     }
@@ -223,11 +235,16 @@ export function useDragNote(options: UseDragNoteOptions) {
   /**
    * Schedule (coalesced) a position commit for `noteId` at canvas `x`/`y`.
    * Map overwrite per note makes same-note repeats collapse to the last
-   * position; distinct notes each keep their own entry.
+   * position; distinct notes each keep their own entry. Positions are
+   * snapped to whole pixels and OUT-OF-BOUNDS DROPS ARE REJECTED HERE (the
+   * single wire chokepoint — a drop beyond ±1 000 000 never leaves a
+   * request, mirroring the server's sanity bounds).
    * Test seam: public so unit tests can drive commits without pointer events.
    */
   function commit(noteId: string, x: number, y: number): void {
-    pendingCommits.set(noteId, { x, y })
+    const wire = toWirePosition(x, y)
+    if (!isWithinNotePositionBounds(wire.x, wire.y)) return
+    pendingCommits.set(noteId, wire)
     if (flushTimer !== null) clearTimeout(flushTimer)
     flushTimer = setTimeout(flushPending, debounceMs)
   }

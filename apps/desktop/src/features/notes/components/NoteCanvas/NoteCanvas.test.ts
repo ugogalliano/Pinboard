@@ -12,6 +12,7 @@ import { notesKeys } from '../../composables/useNotes'
 import { useAuthStore } from '@/stores/authStore'
 import { membersKeys } from '@/features/members'
 import { API_URLS } from '@/shared/constants/urls'
+import { NOTE_POSITION_MAX } from '@/shared/constants/note-position-bounds'
 import { server } from '../../../../../test/msw/server'
 import { callsTo, requestLog } from '../../../../../test/msw/requests'
 import type { NoteDto } from '@/shared/types/api'
@@ -213,6 +214,19 @@ describe('NoteCanvas', () => {
       { method: 'GET', url: MEMBERS_URL },
       { method: 'GET', url: LIST_URL },
     ])
+  })
+
+  it('a double-click beyond the ±1 000 000 sanity bounds opens NO draft and sends no request', async () => {
+    stubNotes([])
+
+    const { wrapper } = await mountCanvas()
+    await settle()
+
+    // jsdom rects are zeroed, so the client point IS the canvas point.
+    await dblClickCanvas(wrapper, NOTE_POSITION_MAX + 1, 10)
+
+    expect(wrapper.find('[data-testid="note-draft"]').exists()).toBe(false)
+    expect(callsTo(LIST_URL, 'POST')).toHaveLength(0)
   })
 
   it('Escape closes the draft with zero POSTs', async () => {
@@ -432,6 +446,25 @@ describe('NoteCanvas', () => {
       positionX: 60,
       positionY: 50,
     })
+  })
+
+  it('a drag dropped beyond the ±1 000 000 sanity bounds sends NO PUT and retains no drop', async () => {
+    // Out-of-range gesture positions are rejected client-side: the server
+    // would answer 400, so the drop is simply ignored (card snaps back).
+    vi.useFakeTimers()
+    stubNotes([note('n1', { positionX: 10, positionY: 20 })])
+
+    const { wrapper } = await mountCanvas()
+    await tick(300)
+
+    const card = wrapper.find('[data-testid="post-it-card"]').element as HTMLElement
+    card.dispatchEvent(new MouseEvent('pointerdown', { clientX: 100, clientY: 100 }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 100 + NOTE_POSITION_MAX + 50, clientY: 100 }))
+    window.dispatchEvent(new MouseEvent('pointerup'))
+    await tick(300)
+
+    expect(callsTo(API_URLS.notes.detail('n1'), 'PUT')).toHaveLength(0)
+    expect(card.style.transform).toBe('')
   })
 
   it('a pointermove feeds the live offset to the DRAGGED card only', async () => {

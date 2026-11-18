@@ -100,6 +100,7 @@ import { Button } from '@ugogalliano/pm-design-system-vue'
 import Spinner from '@/shared/components/ui/Spinner/Spinner.vue'
 import { isApiError, mapApiErrorToMessage } from '@/shared/services/api'
 import { normalizeRouteId } from '@/shared/composables/normalizeRouteId'
+import { isWithinNotePositionBounds } from '@/shared/constants/note-position-bounds'
 import { NOTE_COLOR_NAMES, type NoteColor } from '@/shared/constants/note-colors'
 import { useCurrentBoardRole } from '@/features/members'
 import type { NoteDto } from '@/shared/types/api'
@@ -207,6 +208,10 @@ function onCanvasDblClick(event: MouseEvent): void {
     surface.scrollLeft,
     surface.scrollTop,
   )
+  // Out-of-bounds points (beyond the server's ±1 000 000 sanity bounds) are
+  // IGNORED like an out-of-range drop: no draft opens, so no create request
+  // can ever carry a position the backend would reject.
+  if (!isWithinNotePositionBounds(x, y)) return
   // Second double-click while a draft is open replaces it — the nonce-keyed
   // remount resets it to a fresh empty editor even at the SAME pixel —
   // still exactly ONE draft, so no duplicate temp notes are possible.

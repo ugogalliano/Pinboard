@@ -396,5 +396,97 @@ describe('useDragNote', () => {
       // Negative results are legitimate (pointer left/above the container).
       expect(clientToCanvas(50, 10, rect, 0, 0)).toEqual({ x: -50, y: -30 })
     })
+
+    it('returns INTEGER pixels — fractions are rounded, never emitted (wire type is int)', () => {
+      const rect = { left: 100, top: 40 } as DOMRect
+
+      const positive = clientToCanvas(250.7, 140.2, rect, 10, 20)
+      expect(positive).toEqual({ x: 161, y: 120 })
+      expect(Number.isInteger(positive.x)).toBe(true)
+      expect(Number.isInteger(positive.y)).toBe(true)
+
+      // Negative coordinate case: rounding toward the nearest whole pixel.
+      const negative = clientToCanvas(49.6, 9.4, rect, 0, 0)
+      expect(negative).toEqual({ x: -50, y: -31 })
+      expect(Number.isInteger(negative.x)).toBe(true)
+      expect(Number.isInteger(negative.y)).toBe(true)
+    })
+  })
+
+  describe('server sanity bounds (±1 000 000)', () => {
+    it('commit at exactly the bounds DOES schedule the PUT (inclusive)', async () => {
+      const stored = [note('n1')]
+      const { bodies } = stubNoteApi(stored)
+      queryClient.setQueryData(notesKeys.list(BOARD), stored)
+
+      const { api } = mountDrag()
+      api.commit('n1', 1_000_000, -1_000_000)
+      await tick(300)
+
+      expect(callsTo(API_URLS.notes.detail('n1'), 'PUT')).toHaveLength(1)
+      expect(bodies[0]).toMatchObject({ positionX: 1_000_000, positionY: -1_000_000 })
+    })
+
+    it('an out-of-range commit produces NO request at all', async () => {
+      const stored = [note('n1')]
+      const { bodies } = stubNoteApi(stored)
+      queryClient.setQueryData(notesKeys.list(BOARD), stored)
+
+      const { api } = mountDrag()
+      api.commit('n1', 1_000_001, 0)
+      api.commit('n2-x', 0, -1_000_001)
+      api.flush()
+      await tick(300)
+
+      expect(bodies).toHaveLength(0)
+      expect(requestLog.filter((entry) => entry.method === 'PUT')).toHaveLength(0)
+    })
+
+    it('commit rounds fractional positions before sending (never a fraction on the wire)', async () => {
+      const stored = [note('n1')]
+      const { bodies } = stubNoteApi(stored)
+      queryClient.setQueryData(notesKeys.list(BOARD), stored)
+
+      const { api } = mountDrag()
+      api.commit('n1', 42.6, 43.4)
+      await tick(300)
+
+      expect(bodies).toHaveLength(1)
+      expect(bodies[0]).toMatchObject({ positionX: 43, positionY: 43 })
+    })
+
+    it('endDrag beyond the bounds commits nothing and retains no visual (drops back to the cached position)', async () => {
+      const stored = [note('n1', { positionX: 10, positionY: 20 })]
+      const { bodies } = stubNoteApi(stored)
+      queryClient.setQueryData(notesKeys.list(BOARD), stored)
+
+      const { api } = mountDrag()
+      api.startDrag(stored[0]!, { clientX: 100, clientY: 100 })
+      // ~1 000 000 px drag: the live position lands beyond the wire bound.
+      api.onPointerMove({ clientX: 1_000_100, clientY: 100 })
+      api.endDrag()
+
+      expect(api.pendingVisual.value).toBeNull()
+      await tick(300)
+      expect(bodies).toHaveLength(0)
+      expect(callsTo(API_URLS.notes.detail('n1'), 'PUT')).toHaveLength(0)
+    })
+
+    it('endDrag lands on WHOLE pixels within bounds (fractional pointer deltas)', async () => {
+      const stored = [note('n1', { positionX: 10, positionY: 20 })]
+      const { bodies } = stubNoteApi(stored)
+      queryClient.setQueryData(notesKeys.list(BOARD), stored)
+
+      const { api } = mountDrag()
+      api.startDrag(stored[0]!, { clientX: 100, clientY: 100 })
+      api.onPointerMove({ clientX: 150.4, clientY: 130.7 })
+      api.endDrag()
+      // The retained visual already carries the ROUNDED (wire) position.
+      expect(api.pendingVisual.value).toEqual({ id: 'n1', x: 60, y: 51 })
+
+      await tick(300)
+      expect(bodies).toHaveLength(1)
+      expect(bodies[0]).toMatchObject({ positionX: 60, positionY: 51 })
+    })
   })
 })
