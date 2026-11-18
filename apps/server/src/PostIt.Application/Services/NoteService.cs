@@ -49,8 +49,6 @@ public class NoteService : INoteService
         ValidateContent(request.Content);
         ValidateColor(request.Color);
 
-        _logger.LogInformation("Validation completed");
-
         if (!await _authorizationService.CanCreateNoteAsync(userId, boardId, cancellationToken))
         {
             throw new UnauthorizedAccessException("Only Owner or Editor can create notes.");
@@ -78,8 +76,6 @@ public class NoteService : INoteService
     {
         ValidateContent(request.Content);
         ValidateColor(request.Color);
-
-        _logger.LogInformation("Validation completed");
 
         var note = await _noteRepository.GetByIdAsync(noteId, cancellationToken);
         if (note == null)

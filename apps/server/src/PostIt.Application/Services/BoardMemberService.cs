@@ -74,8 +74,6 @@ public class BoardMemberService : IBoardMemberService
             throw new ArgumentException("Role must be Editor or Viewer.", nameof(request.Role));
         }
 
-        _logger.LogInformation("Validation completed");
-
         var member = new BoardMember(boardId, targetUser.Id, role);
         await _boardMemberRepository.AddAsync(member, cancellationToken);
         await _boardMemberRepository.SaveChangesAsync(cancellationToken);
@@ -113,8 +111,6 @@ public class BoardMemberService : IBoardMemberService
         {
             throw new ArgumentException("Role must be Editor or Viewer.", nameof(request.Role));
         }
-
-        _logger.LogInformation("Validation completed");
 
         member.UpdateRole(role);
         await _boardMemberRepository.SaveChangesAsync(cancellationToken);

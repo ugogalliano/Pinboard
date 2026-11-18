@@ -302,9 +302,13 @@ prefer validating against the real Postgres path when Docker is available.
   (`Notes.BoardId`, `BoardMembers(BoardId, UserId)`); add indexes with schema
   changes that introduce new query patterns.
 - Health: `GET /health` (includes a `postgresql` DB check), `GET /api/ping`.
-- Logging: console structured logging; HTTP request logging enabled in
-  Development only. `ExceptionHandlingMiddleware` logs unhandled exceptions
-  with method + path.
+- Logging: console structured logging; detailed raw HTTP request/response
+  logging is enabled only in Development. It captures all request/response
+  properties and headers plus JSON/form/text bodies, bounded to 64 KiB per
+  body. Its explicit `RequestUrl` includes scheme, host/port, PathBase, path,
+  and query string. Production does not register or run this HTTP logging
+  middleware.
+  `ExceptionHandlingMiddleware` logs unhandled exceptions with method + path.
 - Thread `CancellationToken` so aborted requests don't waste DB work.
 
 ### Logging
@@ -312,15 +316,17 @@ prefer validating against the real Postgres path when Docker is available.
 The server follows a structured logging standard (no requestId/correlation — operations are self-contained and identifiable by their entity GUIDs).
 
 - **Levels**:
-  - `INFO` — significant flow milestones: `Validation completed`, `<Entity> created/updated/deleted`, auth successes, `Broadcast sent`, `Hub joined/left`.
+  - `INFO` — significant flow milestones: `<Entity> created/updated/deleted`, auth successes, `Broadcast sent`, `Hub joined/left`.
   - `WARNING` — abnormal but manageable situations: `Login failed`, `Refresh failed`, `Authorization denied`. Never for normal operation.
   - `ERROR` — operation failures that need attention; always logged with the exception. Never for expected 4xx client errors (validation, not-found, forbidden) or request cancellations (`OperationCanceledException` is rethrown without a log).
-- **Format**: structured `ILogger` messages with `{Placeholder}` arguments (never string interpolation), one event per line: `EventName | key={Value}`. Milestone events may be bare (no key=value), e.g. `Validation completed`. The logger category is the component. Console output is single-line with a UTC timestamp (configured in `Program.cs` via `AddSimpleConsole`: `SingleLine`, `TimestampFormat`, `UseUtcTimestamp`).
+- **Format**: structured `ILogger` messages with `{Placeholder}` arguments (never string interpolation), one event per line: `EventName | key={Value}`. Milestone events may be bare (no key=value), e.g. `Hub joined`. The logger category is the component. Console output is single-line with a UTC timestamp (configured in `Program.cs` via `AddConsole`, `ColoredConsoleFormatter`, and `SimpleConsoleFormatterOptions`: `SingleLine`, `TimestampFormat`, `UseUtcTimestamp`).
+- **Console colors**: ANSI color is limited to the log level (Information cyan, Warning yellow, Error/Critical red). Detection honors `NO_COLOR` first, then `FORCE_COLOR` and `DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION`, then falls back to terminal auto-detection. The Development `http` and `https` launch profiles set both force variables so redirected `dotnet run`/`dotnet watch run` output retains color; unset overrides preserve auto-detection.
 - **Event naming**: stable `PascalCase` event phrases as the first token (`Note created`, `Login failed`, `Broadcast sent`, `Hub joined`), then `key=value` pairs. Reuse the existing vocabulary rather than inventing synonyms.
-- **What to log**: only meaningful phases — validation completed, entity persisted (after the single `SaveChangesAsync` in the service, never in repositories), auth outcomes, SignalR broadcasts, hub join/leave, authorization denials (`WARNING`). Reads are NOT logged. Repositories are NOT logged.
+- **What to log**: only meaningful phases — entity persisted (after the single `SaveChangesAsync` in the service, never in repositories), auth outcomes, SignalR broadcasts, hub join/leave, authorization denials (`WARNING`). Reads are NOT logged. Repositories are NOT logged.
 - **External calls (SignalR broadcast)**: `INFO Broadcast sent | boardId=... event=... durationMs=...` on success; `ERROR Broadcast failed` with exception on failure (rethrow the original exception); `OperationCanceledException` (client abort) is rethrown WITHOUT logging — it is normal in realtime apps.
-- **Durations**: record `durationMs` on significant operations (e.g. broadcast). There is no request-level timing.
-- **Sensitive data — never log**: passwords, `PasswordHash`, access/refresh tokens, `Authorization` headers, query strings (SignalR `?access_token=`), request/response bodies, user content (note content/color, board names), emails by default, configuration secrets (JWT signing key, connection strings), IP addresses. Log GUID IDs only.
+- **Durations**: record `durationMs` on significant application operations (e.g. broadcast). Normal application logs do not add request-level timing; Development-only raw HTTP logging includes request duration.
+- **Sensitive data — normal application logs**: never log passwords, `PasswordHash`, access/refresh tokens, `Authorization` headers, query strings, request/response bodies, user content (note content/color, board names), emails by default, configuration secrets (JWT signing key, connection strings), or IP addresses. Log GUID IDs only. This restriction applies to application/operational events, not the explicit Development-only raw HTTP logger described below.
+- **Development-only raw HTTP logging (explicit exception)**: `HttpLoggingFields.All` captures request/response properties, all header values (including custom, `Authorization`, and `Set-Cookie`), the complete `RequestUrl` (scheme, host/port, PathBase, path, and query; including SignalR `?access_token=`), and eligible JSON/form/text bodies. `CombineLogs = true` consolidates everything into **one log entry per request** (a single `HttpLoggingMiddleware` "Request and Response" line) instead of separate request/response/body/duration events. The interceptor keeps the entry clean: `RequestUrl` is added once (request phase, which flows into the combined entry) and the framework's header sections are disabled via `TryDisable(HttpLoggingFields.RequestHeaders/ResponseHeaders)`, so header values appear only once each — raw, from the interceptor — with no `[Redacted]` duplicates. Request and response body capture is capped at 64 KiB each; content beyond the cap is truncated from the log and the middleware buffers bodies, which has memory/performance cost. Do not use with real credentials or user data; keep these logs local, unshared, and uncollected. Raw HTTP details exist only in Development and must remain absent from the Production pipeline. Do not extend body capture to normal application logs or other environments.
 - **ERROR context**: operation, component (logger category), entity IDs, exception and message. Never generic messages like "Something went wrong".
 - **Logging review criteria** (enforced by the reviewer agent, see `.opencode/agents/reviewer-server.md`):
   1. New significant flows include the necessary logs; start and end of significant operations are traceable at operation level.
@@ -328,8 +334,8 @@ The server follows a structured logging standard (no requestId/correlation — o
   3. `ERROR` logs exist wherever an operation can fail, with sufficient troubleshooting context (operation, component, entity ID, exception).
   4. No duplicated or unnecessarily verbose logs; logging is meaningful, never per-statement.
   5. External calls (SignalR broadcasts) are traced: event, `durationMs`, failure `ERROR`.
-  6. Durations are recorded where needed to diagnose performance problems.
-  7. No sensitive data is ever logged.
+  6. Durations are recorded where needed to diagnose performance problems; raw request duration is Development-only.
+  7. No sensitive data is logged by normal application events. The documented raw HTTP Development exception is bounded and must never be enabled in Production.
   8. New logs follow the event-naming and format conventions above.
   9. When a log is missing, the reviewer must state where, which event, which level, what information, and why it helps troubleshooting.
 

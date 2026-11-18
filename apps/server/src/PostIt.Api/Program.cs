@@ -70,12 +70,23 @@ builder.Services.Configure<SimpleConsoleFormatterOptions>(options =>
 });
 builder.Logging.AddDebug();
 builder.Logging.SetMinimumLevel(LogLevel.Information);
+builder.Logging.AddFilter("Microsoft.AspNetCore.HttpLogging", LogLevel.Information);
 
-builder.Services.AddHttpLogging(options =>
+if (builder.Environment.IsDevelopment())
 {
-    options.LoggingFields = Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.RequestPropertiesAndHeaders |
-                            Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.ResponseStatusCode;
-});
+    builder.Services.AddHttpLogging(options =>
+    {
+        options.LoggingFields = Microsoft.AspNetCore.HttpLogging.HttpLoggingFields.All;
+        options.CombineLogs = true;
+        options.RequestBodyLogLimit = 64 * 1024;
+        options.ResponseBodyLogLimit = 64 * 1024;
+        options.MediaTypeOptions.AddText("application/json");
+        options.MediaTypeOptions.AddText("application/problem+json");
+        options.MediaTypeOptions.AddText("application/x-www-form-urlencoded");
+        options.MediaTypeOptions.AddText("text/plain");
+    });
+    builder.Services.AddHttpLoggingInterceptor<DevelopmentHttpLoggingInterceptor>();
+}
 
 // JWT Authentication
 builder.Services.AddAuthentication(options =>

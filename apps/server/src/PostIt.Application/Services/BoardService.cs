@@ -23,8 +23,6 @@ public class BoardService : IBoardService
     {
         ValidateName(request.Name);
 
-        _logger.LogInformation("Validation completed");
-
         var board = new Board(request.Name, userId);
         board.Members.Add(new BoardMember(board.Id, userId, BoardRole.Owner));
 
@@ -61,8 +59,6 @@ public class BoardService : IBoardService
     public async Task<BoardDto> UpdateBoardAsync(Guid userId, Guid boardId, UpdateBoardRequest request, CancellationToken cancellationToken = default)
     {
         ValidateName(request.Name);
-
-        _logger.LogInformation("Validation completed");
 
         var board = await _boardRepository.GetByIdAsync(boardId, cancellationToken);
         if (board == null)
