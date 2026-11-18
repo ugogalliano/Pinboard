@@ -164,6 +164,43 @@ public class NoteServiceTests
         Assert.Contains("50", ex.Message);
     }
 
+    [Theory]
+    [InlineData(1_000_001, 0, "PositionX")]
+    [InlineData(-1_000_001, 0, "PositionX")]
+    [InlineData(int.MinValue, 0, "PositionX")]
+    [InlineData(int.MaxValue, 0, "PositionX")]
+    [InlineData(0, 1_000_001, "PositionY")]
+    [InlineData(0, -1_000_001, "PositionY")]
+    [InlineData(0, int.MinValue, "PositionY")]
+    [InlineData(0, int.MaxValue, "PositionY")]
+    public async Task CreateNoteAsync_PositionOutOfRange_ThrowsArgumentException(int x, int y, string paramName)
+    {
+        var request = new CreateNoteRequest("Hello", "yellow", x, y);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _svc.CreateNoteAsync(Guid.NewGuid(), Guid.NewGuid(), request));
+        Assert.Contains("out of the allowed range", ex.Message);
+        Assert.Equal(paramName, ex.ParamName);
+    }
+
+    [Theory]
+    [InlineData(1_000_000, -1_000_000)]
+    [InlineData(-1_000_000, 1_000_000)]
+    public async Task CreateNoteAsync_PositionAtBoundary_CreatesNote(int x, int y)
+    {
+        var userId = Guid.NewGuid();
+        var boardId = Guid.NewGuid();
+        var board = CreateBoard(boardId);
+
+        _authSvc.Setup(a => a.CanCreateNoteAsync(userId, boardId, default)).ReturnsAsync(true);
+        _boardRepo.Setup(r => r.GetByIdAsync(boardId, default)).ReturnsAsync(board);
+        _noteRepo.Setup(r => r.SaveChangesAsync(default)).Returns(Task.CompletedTask);
+
+        var result = await _svc.CreateNoteAsync(userId, boardId, new CreateNoteRequest("Hello", "yellow", x, y));
+
+        Assert.Equal(x, result.PositionX);
+        Assert.Equal(y, result.PositionY);
+    }
+
     [Fact]
     public async Task UpdateNoteAsync_Owner_UpdatesNote()
     {
@@ -240,6 +277,44 @@ public class NoteServiceTests
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => _svc.UpdateNoteAsync(Guid.NewGuid(), Guid.NewGuid(), request));
         Assert.Contains("50", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(1_000_001, 0, "PositionX")]
+    [InlineData(-1_000_001, 0, "PositionX")]
+    [InlineData(int.MinValue, 0, "PositionX")]
+    [InlineData(int.MaxValue, 0, "PositionX")]
+    [InlineData(0, 1_000_001, "PositionY")]
+    [InlineData(0, -1_000_001, "PositionY")]
+    [InlineData(0, int.MinValue, "PositionY")]
+    [InlineData(0, int.MaxValue, "PositionY")]
+    public async Task UpdateNoteAsync_PositionOutOfRange_ThrowsArgumentException(int x, int y, string paramName)
+    {
+        var request = new UpdateNoteRequest("Updated", "blue", x, y);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => _svc.UpdateNoteAsync(Guid.NewGuid(), Guid.NewGuid(), request));
+        Assert.Contains("out of the allowed range", ex.Message);
+        Assert.Equal(paramName, ex.ParamName);
+    }
+
+    [Theory]
+    [InlineData(1_000_000, -1_000_000)]
+    [InlineData(-1_000_000, 1_000_000)]
+    public async Task UpdateNoteAsync_PositionAtBoundary_UpdatesNote(int x, int y)
+    {
+        var userId = Guid.NewGuid();
+        var noteId = Guid.NewGuid();
+        var boardId = Guid.NewGuid();
+        var note = CreateNote(noteId, boardId, userId);
+
+        _noteRepo.Setup(r => r.GetByIdAsync(noteId, default)).ReturnsAsync(note);
+        _authSvc.Setup(a => a.CanEditNoteAsync(userId, boardId, default)).ReturnsAsync(true);
+        _noteRepo.Setup(r => r.SaveChangesAsync(default)).Returns(Task.CompletedTask);
+
+        var result = await _svc.UpdateNoteAsync(userId, noteId, new UpdateNoteRequest("Updated", "blue", x, y));
+
+        Assert.Equal(x, result.PositionX);
+        Assert.Equal(y, result.PositionY);
     }
 
     [Fact]

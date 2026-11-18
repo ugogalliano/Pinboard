@@ -121,6 +121,60 @@ public class NoteEndpointsTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
+    public async Task CreateNote_ContentOver1000_ReturnsBadRequest()
+    {
+        var token = await RegisterAndLoginAsync("create-note-long@example.com", "Password123!", "Create Note Long");
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var boardResponse = await _client.PostAsJsonAsync("/api/boards", new CreateBoardRequest("Notes Board"));
+        var board = await boardResponse.Content.ReadFromJsonAsync<BoardDto>();
+        Assert.NotNull(board);
+
+        var request = new CreateNoteRequest(new string('x', 1001), "yellow", 0, 0);
+        var response = await _client.PostAsJsonAsync($"/api/boards/{board.Id}/notes", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateNote_ContentAt1000_ReturnsOk()
+    {
+        var token = await RegisterAndLoginAsync("create-note-max@example.com", "Password123!", "Create Note Max");
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var boardResponse = await _client.PostAsJsonAsync("/api/boards", new CreateBoardRequest("Notes Board"));
+        var board = await boardResponse.Content.ReadFromJsonAsync<BoardDto>();
+        Assert.NotNull(board);
+
+        var request = new CreateNoteRequest(new string('x', 1000), "yellow", 0, 0);
+        var response = await _client.PostAsJsonAsync($"/api/boards/{board.Id}/notes", request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<NoteDto>();
+        Assert.NotNull(result);
+        Assert.Equal(1000, result.Content.Length);
+    }
+
+    [Fact]
+    public async Task CreateNote_PositionOutOfRange_ReturnsBadRequest()
+    {
+        var token = await RegisterAndLoginAsync("create-note-position@example.com", "Password123!", "Create Note Position");
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var boardResponse = await _client.PostAsJsonAsync("/api/boards", new CreateBoardRequest("Notes Board"));
+        var board = await boardResponse.Content.ReadFromJsonAsync<BoardDto>();
+        Assert.NotNull(board);
+
+        var request = new CreateNoteRequest("Hello", "yellow", 1_000_001, 0);
+        var response = await _client.PostAsJsonAsync($"/api/boards/{board.Id}/notes", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task CreateNote_NonExistingBoard_ReturnsForbidden()
     {
         var token = await RegisterAndLoginAsync("create-note-404@example.com", "Password123!", "Create Note 404");

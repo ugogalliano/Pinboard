@@ -48,6 +48,7 @@ public class NoteService : INoteService
     {
         ValidateContent(request.Content);
         ValidateColor(request.Color);
+        ValidatePosition(request.PositionX, request.PositionY);
 
         if (!await _authorizationService.CanCreateNoteAsync(userId, boardId, cancellationToken))
         {
@@ -76,6 +77,7 @@ public class NoteService : INoteService
     {
         ValidateContent(request.Content);
         ValidateColor(request.Color);
+        ValidatePosition(request.PositionX, request.PositionY);
 
         var note = await _noteRepository.GetByIdAsync(noteId, cancellationToken);
         if (note == null)
@@ -145,6 +147,21 @@ public class NoteService : INoteService
         if (color.Length > 50)
         {
             throw new ArgumentException("Color must not exceed 50 characters.", nameof(color));
+        }
+    }
+
+    private static void ValidatePosition(int x, int y)
+    {
+        // Explicit range comparison: Math.Abs(int.MinValue) overflows back to
+        // int.MinValue and would pass an |value| > limit check.
+        if (x is < -1_000_000 or > 1_000_000)
+        {
+            throw new ArgumentException("Position is out of the allowed range.", "PositionX");
+        }
+
+        if (y is < -1_000_000 or > 1_000_000)
+        {
+            throw new ArgumentException("Position is out of the allowed range.", "PositionY");
         }
     }
 

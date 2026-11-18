@@ -17,7 +17,7 @@ public class NoteConfiguration : IEntityTypeConfiguration<Note>
 
         builder.Property(n => n.Content)
             .IsRequired()
-            .HasMaxLength(2000);
+            .HasMaxLength(1000);
 
         builder.Property(n => n.Color)
             .IsRequired()
