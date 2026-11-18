@@ -31,14 +31,60 @@ public class AuthEndpointsTests : IClassFixture<TestWebApplicationFactory>
     }
 
     [Fact]
-    public async Task Register_DuplicateEmail_ReturnsBadRequest()
+    public async Task Register_DuplicateEmail_ReturnsConflict()
     {
         var request = new RegisterRequest("dup@example.com", "Password123!", "Dup");
         var first = await _client.PostAsJsonAsync("/api/auth/register", request);
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
 
         var second = await _client.PostAsJsonAsync("/api/auth/register", request);
-        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_DuplicateEmail_DifferentCase_ReturnsConflict()
+    {
+        var first = await _client.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest("dupcase@example.com", "Password123!", "Dup Case"));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+
+        var second = await _client.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest("DupCase@Example.COM", "Password123!", "Dup Case"));
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_DisplayNameEmail_ConflictsWithPlainAddress_ReturnsConflict()
+    {
+        var first = await _client.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest("displayname@example.com", "Password123!", "Plain Address"));
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+
+        // MailAddress accepts display-name syntax; the canonical address part
+        // must still collide with the existing account.
+        var second = await _client.PostAsJsonAsync("/api/auth/register",
+            new RegisterRequest("Display Name <displayname@example.com>", "Password123!", "Display Name"));
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_InvalidEmail_ReturnsBadRequest()
+    {
+        var request = new RegisterRequest("not-an-email", "Password123!", "Invalid Email");
+
+        var response = await _client.PostAsJsonAsync("/api/auth/register", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_ShortPassword_ReturnsBadRequest()
+    {
+        var request = new RegisterRequest("short-pw@example.com", "abc123", "Short Password");
+
+        var response = await _client.PostAsJsonAsync("/api/auth/register", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -55,6 +101,18 @@ public class AuthEndpointsTests : IClassFixture<TestWebApplicationFactory>
         Assert.NotNull(result);
         Assert.False(string.IsNullOrWhiteSpace(result.AccessToken));
         Assert.False(string.IsNullOrWhiteSpace(result.RefreshToken));
+    }
+
+    [Fact]
+    public async Task Login_MixedCaseEmail_ReturnsTokens()
+    {
+        var registerReq = new RegisterRequest("mixedcase-login@example.com", "Password123!", "Mixed Case Login");
+        await _client.PostAsJsonAsync("/api/auth/register", registerReq);
+
+        var loginReq = new LoginRequest("MixedCase-Login@Example.COM", "Password123!");
+        var response = await _client.PostAsJsonAsync("/api/auth/login", loginReq);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]

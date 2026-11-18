@@ -14,6 +14,12 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        var jwtSecret = configuration["JwtSettings:Secret"];
+        if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
+        {
+            throw new InvalidOperationException("JwtSettings:Secret must be configured and at least 32 characters.");
+        }
+
         services.AddDbContext<PostItDbContext>(options =>
         {
             options.UseNpgsql(

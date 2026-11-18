@@ -29,12 +29,14 @@ public class AuthService : IAuthService
 
     public async Task<LoginResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken = default)
     {
-        if (await _userRepository.EmailExistsAsync(request.Email, cancellationToken))
+        var email = ValidateRegister(request.Email, request.Password, request.DisplayName);
+
+        if (await _userRepository.EmailExistsAsync(email, cancellationToken))
         {
             throw new InvalidOperationException("User with this email already exists.");
         }
 
-        var user = new User(request.Email, string.Empty, request.DisplayName);
+        var user = new User(email, string.Empty, request.DisplayName);
         var passwordHash = _passwordHasher.HashPassword(user, request.Password);
         user.SetPasswordHash(passwordHash);
 
@@ -49,6 +51,9 @@ public class AuthService : IAuthService
 
         await _refreshTokenRepository.AddAsync(refreshToken, cancellationToken);
 
+        // Single unit of work: user and refresh token commit in one transaction.
+        await _userRepository.SaveChangesAsync(cancellationToken);
+
         _logger.LogInformation("Registration succeeded | userId={UserId}", user.Id);
 
         return new LoginResponse(accessToken, refreshTokenValue, DateTime.UtcNow.AddMinutes(15));
@@ -56,7 +61,10 @@ public class AuthService : IAuthService
 
     public async Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
     {
-        var user = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
+        var normalizedEmail = EmailNormalizer.TryNormalize(request.Email);
+        var user = normalizedEmail == null
+            ? null
+            : await _userRepository.GetByEmailAsync(normalizedEmail, cancellationToken);
         if (user == null)
         {
             _logger.LogWarning("Login failed | reason=Invalid credentials");
@@ -77,6 +85,7 @@ public class AuthService : IAuthService
             DateTime.UtcNow.AddDays(7));
 
         await _refreshTokenRepository.AddAsync(refreshToken, cancellationToken);
+        await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Login succeeded | userId={UserId}", user.Id);
 
@@ -111,6 +120,9 @@ public class AuthService : IAuthService
             DateTime.UtcNow.AddDays(7));
         await _refreshTokenRepository.AddAsync(newRefreshToken, cancellationToken);
 
+        // Single unit of work: revoke + replacement commit in one transaction.
+        await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
+
         var accessToken = _tokenService.GenerateAccessToken(user);
 
         _logger.LogInformation("Refresh succeeded | userId={UserId}", user.Id);
@@ -125,6 +137,7 @@ public class AuthService : IAuthService
         {
             token.Revoke();
             await _refreshTokenRepository.UpdateAsync(token, cancellationToken);
+            await _refreshTokenRepository.SaveChangesAsync(cancellationToken);
         }
 
         _logger.LogInformation("Logout completed");
@@ -139,5 +152,30 @@ public class AuthService : IAuthService
         }
 
         return new MeResponse(user.Id, user.Email, user.DisplayName);
+    }
+
+    /// <summary>
+    /// Validates registration input and returns the canonical email address to
+    /// store and check for duplicates.
+    /// </summary>
+    private static string ValidateRegister(string email, string password, string displayName)
+    {
+        var normalizedEmail = EmailNormalizer.TryNormalize(email);
+        if (normalizedEmail == null)
+        {
+            throw new ArgumentException("Email is not a valid email address.", nameof(email));
+        }
+
+        if (password == null || password.Length < 8)
+        {
+            throw new ArgumentException("Password must be at least 8 characters.", nameof(password));
+        }
+
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            throw new ArgumentException("Display name is required.", nameof(displayName));
+        }
+
+        return normalizedEmail;
     }
 }

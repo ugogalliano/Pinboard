@@ -22,6 +22,7 @@ public class AuthController : ControllerBase
     [EnableRateLimiting("auth-credentials")]
     [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<LoginResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
         try
@@ -29,9 +30,13 @@ public class AuthController : ControllerBase
             var response = await _authService.RegisterAsync(request, cancellationToken);
             return Ok(response);
         }
-        catch (InvalidOperationException ex)
+        catch (ArgumentException ex)
         {
             return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
         }
     }
 

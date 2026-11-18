@@ -58,7 +58,10 @@ public class BoardMemberService : IBoardMemberService
             throw new KeyNotFoundException($"Board with id {boardId} not found.");
         }
 
-        var targetUser = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
+        var targetEmail = EmailNormalizer.TryNormalize(request.Email);
+        var targetUser = targetEmail == null
+            ? null
+            : await _userRepository.GetByEmailAsync(targetEmail, cancellationToken);
         if (targetUser == null)
         {
             throw new KeyNotFoundException($"User with email {request.Email} not found.");

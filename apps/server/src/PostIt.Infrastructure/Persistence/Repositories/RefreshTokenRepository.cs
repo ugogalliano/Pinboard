@@ -24,12 +24,16 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     public async Task AddAsync(RefreshToken refreshToken, CancellationToken cancellationToken = default)
     {
         await _context.RefreshTokens.AddAsync(refreshToken, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task UpdateAsync(RefreshToken refreshToken, CancellationToken cancellationToken = default)
+    public Task UpdateAsync(RefreshToken refreshToken, CancellationToken cancellationToken = default)
     {
         _context.RefreshTokens.Update(refreshToken);
+        return Task.CompletedTask;
+    }
+
+    public async Task SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
         await _context.SaveChangesAsync(cancellationToken);
     }
 }
